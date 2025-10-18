@@ -1,0 +1,3 @@
+Welcome to SyncText!
+This is a collaborative text editor.
+Start editing to see changes sync across users.
