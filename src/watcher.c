@@ -1,0 +1,1 @@
+// Handles file monitoring (using stat()), detects changed lines, computes differences, and generates Operation objects.

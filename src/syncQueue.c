@@ -1,0 +1,1 @@
+// Implements a lock-free thread-safe circular queue for operations to pass between threads.
