@@ -1,4 +1,4 @@
-## CRDT-Collab
+# SyncX Collaborative Text Editor
 A CRDT based collaborative text editor that allows multiple users at once
 
 ## Architecture of CRDT-Collab
@@ -33,17 +33,13 @@ SyncText/
 └── README.md
 ```
 
-# SyncText Collaborative Text Editor
+
 
 ## Project Overview
 
 SyncText is a collaborative text editor that enables multiple users to collaboratively edit a plain text file in real-time over a local network or a single machine. It uses a Conflict-free Replicated Data Type (CRDT) approach to ensure consistent merging of text changes with minimal conflict.
 
 The project is designed to be portable and runs on both Linux and macOS platforms. It employs Unix Domain Sockets for inter-process communication.
-
----
-
-## How the Code Works
 
 ### Components and Architecture
 
