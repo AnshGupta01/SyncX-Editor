@@ -12,7 +12,7 @@
 
 
 typedef struct {
-    char op_type;       // Insert ('I'), Delete ('D'), Replace ('R')
+    char op_type;       // Insert ('I'), Delete ('D'), Replace ('R'), use R for simplicity
     int line_no;
     int col_start;
     int col_end;
