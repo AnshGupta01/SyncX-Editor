@@ -13,6 +13,8 @@
 
 #define MAX_CONNECTION_QUEUE 5
 
+static void process_received_operation(const Operation* op);
+
 static int server_fd = -1;
 static SyncQueue* recv_queue = NULL;
 static pthread_t receiver_thread;
@@ -20,6 +22,7 @@ static volatile int running = 0;
 static char socket_path[108];
 
 static void* receiver_loop(void* arg) {
+    (void)arg;
     while (running) {
         int client_fd = accept(server_fd, NULL, NULL);
         if (client_fd < 0) {

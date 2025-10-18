@@ -54,10 +54,10 @@ SyncText consists of the following key components spread across different module
 - **Operation Queue (`sync_queue.[ch]`)**  
   Implements a lock-free, thread-safe circular queue to communicate operations safely between threads (watcher → broadcaster and receiver → CRDT merge).
 
-- **Broadcaster (`broadcaster_unix.[ch]`)**  
+- **Broadcaster (`broadcaster.[ch]`)**  
   Runs a dedicated thread that dequeues operations from the queue and sends them to all peer processes using Unix Domain Sockets. Each user has a unique socket path.
 
-- **Receiver (`receiver_unix.[ch]`)**  
+- **Receiver (`receiver.[ch]`)**  
   Runs a Unix Domain Socket server listening on a unique socket path for incoming connections from peers. It accepts operation messages, enqueues them, applies CRDT merging, and refreshes the terminal display in real-time.
 
 - **Terminal UI (`utils.[ch]`)**  

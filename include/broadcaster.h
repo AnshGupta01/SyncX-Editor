@@ -11,7 +11,7 @@
 // - Number of peers
 // - Pointer to the operation queue (produced by watcher)
 bool broadcaster_init(const char** peer_queues, int peer_count, SyncQueue* in_queue);
-void broadcaster_start(int send_interval_ms);
+void broadcaster_start(void);
 void broadcaster_stop(void);
 
 #endif

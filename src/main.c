@@ -8,6 +8,7 @@
 #include "reciever.h"
 #include "crdt.h"
 #include "utils.h"
+#include <unistd.h>
 
 static volatile int running = 1;
 
@@ -43,19 +44,19 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (!broadcaster_init_unix(peer_sockets, peer_count, op_queue)) {
+    if (!broadcaster_init(peer_sockets, peer_count, op_queue)) {
         fprintf(stderr, "Broadcaster init failed.\n");
         return 1;
     }
 
-    if (!receiver_init_unix(user_id, op_queue)) {
+    if (!receiver_init(user_id, op_queue)) {
         fprintf(stderr, "Receiver init failed.\n");
         return 1;
     }
 
     watcher_start(100);
-    broadcaster_start_unix();
-    receiver_start_unix();
+    broadcaster_start();
+    receiver_start();
 
     printf("SyncText collaborative editor started for user %d\n", user_id);
 
@@ -68,8 +69,8 @@ int main(int argc, char* argv[]) {
     printf("\nShutting down...\n");
 
     watcher_stop();
-    broadcaster_stop_unix();
-    receiver_stop_unix();
+    broadcaster_stop();
+    receiver_stop();
 
     crdt_destroy();
     sync_queue_destroy(op_queue);

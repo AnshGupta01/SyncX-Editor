@@ -6,11 +6,10 @@
 #include <stdio.h>
 
 void utils_refresh_terminal_display(void) {
-    // Clear terminal with ANSI escape code
     printf("\033[H\033[J");
 
-    extern char** document_lines;  // Imported from crdt.c
-    extern size_t line_count;
+    char** document_lines = crdt_get_document_lines();
+    size_t line_count = crdt_get_line_count();
 
     for (size_t i = 0; i < line_count; i++) {
         printf("%s", document_lines[i]);

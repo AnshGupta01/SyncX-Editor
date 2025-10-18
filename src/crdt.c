@@ -10,6 +10,16 @@
 static char** document_lines = NULL;
 static size_t line_count = 0;
 
+// Add these accessor functions
+char** crdt_get_document_lines(void) {
+    return document_lines;
+}
+
+size_t crdt_get_line_count(void) {
+    return line_count;
+}
+
+
 // Helper to expand document to have at least n lines
 static void ensure_line_capacity(size_t n) {
     if (line_count < n) {
