@@ -1,17 +1,25 @@
 CC = gcc
-CFLAGS = -Iinclude -Wall -g -pthread -lrt
-SRC = $(wildcard src/*.c)
-OBJ = $(patsubst src/%.c, build/%.o, $(SRC))
+CFLAGS = -Iinclude -Wall -Wextra -g -pthread
+
+SRCDIR = src
+BUILDDIR = build
 TARGET = sync_text
+
+SRC = $(wildcard $(SRCDIR)/*.c)
+OBJ = $(patsubst $(SRCDIR)/%.c, $(BUILDDIR)/%.o, $(SRC))
+
+.PHONY: all clean
 
 all: $(TARGET)
 
 $(TARGET): $(OBJ)
 	$(CC) $(OBJ) -o $@ $(CFLAGS)
 
-build/%.o: src/%.c
-	mkdir -p build
+$(BUILDDIR)/%.o: $(SRCDIR)/%.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILDDIR):
+	mkdir -p $(BUILDDIR)
+
 clean:
-	rm -rf build $(TARGET)
+	rm -rf $(BUILDDIR) $(TARGET)

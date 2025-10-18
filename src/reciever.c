@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <string.h>
+#include "crdt.h"             // For crdt_merge_operation()
+#include "utils.h"            // For utils_refresh_terminal_display()
 
 #define MAX_CONNECTION_QUEUE 5
 
@@ -29,6 +31,7 @@ static void* receiver_loop(void* arg) {
         ssize_t nread;
         while ((nread = recv(client_fd, &op, sizeof(Operation), 0)) > 0) {
             sync_queue_enqueue(recv_queue, &op);
+            process_received_operation(&op);
         }
         close(client_fd);
     }
@@ -75,4 +78,9 @@ void receiver_stop(void) {
     pthread_join(receiver_thread, NULL);
     close(server_fd);
     unlink(socket_path);
+}
+
+static void process_received_operation(const Operation* op) {
+    crdt_merge_operation(op);
+    utils_refresh_terminal_display();
 }
