@@ -1,5 +1,5 @@
 ## CRDT-Collab
-A CRDT based collaborative text editor that allows upto 5 users at once
+A CRDT based collaborative text editor that allows multiple users at once
 
 ## Architecture of CRDT-Collab
 
