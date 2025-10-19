@@ -5,7 +5,6 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h>
-#include <stdatomic.h>
 
 static UserRegistry* registry = NULL;
 static int shm_fd = -1;
@@ -29,8 +28,21 @@ bool registry_init(void) {
     return true;
 }
 
+static void cleanup_stale_user(int user_id) {
+    if (!registry) return;
+    for (int i = 0; i < registry->count; i++) {
+        if (registry->users[i].user_id == user_id && registry->users[i].active) {
+            registry->users[i].active = 0;
+            printf("Cleaned up stale entry for user %d\n", user_id);
+            break;
+        }
+    }
+}
+
 bool registry_register_user(int user_id, const char* socket_path) {
     if (!registry) return false;
+
+    cleanup_stale_user(user_id);
 
     for (int i = 0; i < MAX_USERS; i++) {
         if (registry->users[i].active == 0) {

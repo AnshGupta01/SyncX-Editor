@@ -41,30 +41,27 @@ SyncText is a collaborative text editor that enables multiple users to collabora
 
 The project is designed to be portable and runs on both Linux and macOS platforms. It employs Unix Domain Sockets for inter-process communication.
 
+### Features
+
+- ✅ Real-time collaborative editing across multiple users
+- ✅ CRDT-based conflict-free merging (Last-Writer-Wins)
+- ✅ Automatic change detection and synchronization
+- ✅ User discovery via shared memory registry
+- ✅ Unix Domain Socket based IPC (macOS & Linux compatible)
+- ✅ Lock-free concurrent programming
+- ✅ Separate local document copies per user
+
 ### Components and Architecture
 
 SyncText consists of the following key components spread across different modules/files:
 
-- **Watcher (`watcher.[ch]`)**  
-  Monitors the local text file for changes. It polls the file modification time and reads new contents periodically. Line differences are detected and converted into `replace` operations, which are enqueued in a thread-safe queue.
-
-- **CRDT Merge (`crdt.[ch]`)**  
-  Maintains an internal document model as an array of lines. It merges incoming operations by applying replace operations on affected lines ensuring last-writer-wins semantics.
-
-- **Operation Queue (`sync_queue.[ch]`)**  
-  Implements a lock-free, thread-safe circular queue to communicate operations safely between threads (watcher → broadcaster and receiver → CRDT merge).
-
-- **Broadcaster (`broadcaster.[ch]`)**  
-  Runs a dedicated thread that dequeues operations from the queue and sends them to all peer processes using Unix Domain Sockets. Each user has a unique socket path.
-
-- **Receiver (`receiver.[ch]`)**  
-  Runs a Unix Domain Socket server listening on a unique socket path for incoming connections from peers. It accepts operation messages, enqueues them, applies CRDT merging, and refreshes the terminal display in real-time.
-
-- **Terminal UI (`utils.[ch]`)**  
-  Provides terminal refresh utilities to clear and redraw the text document in the console after each merge.
-
-- **Main Program (`main.c`)**  
-  Initializes all components, establishes communication channels, starts threads, and manages the program lifecycle including graceful shutdown on signals.
+1. **User Registry (`registry.[ch]`)** - Shared memory based user discovery
+2. **File Watcher (`watcher.[ch]`)** - Monitors local document changes
+3. **CRDT Merge (`crdt.[ch]`)** - Conflict-free document merging
+4. **Broadcaster (`broadcaster.[ch]`)** - Sends operations to peers
+5. **Receiver (`receiver.[ch]`)** - Receives and merges operations
+6. **Operation Queue (`sync_queue.[ch]`)** - Thread-safe operation passing
+7. **Terminal UI (`utils.[ch]`)** - Document display
 
 ### Communication Flow
 
@@ -76,36 +73,23 @@ SyncText consists of the following key components spread across different module
 6. Finally, the **UI refresh** function updates the terminal screen showing the latest document state.
 7. The cycle repeats, continuously synchronizing edits across all running instances, converging eventually on a consistent document state.
 
----
+### Data Flow
+```Local Edit → Watcher → Queue → Broadcaster → Unix Socket → Peer Receiver → CRDT Merge → Display```
 
-## Project Status and Features
-
-- [x] File monitoring via watcher with change detection.
-- [x] Thread-safe operation queue for inter-thread messaging.
-- [x] Unix Domain Socket based broadcaster and receiver for IPC.
-- [x] Basic CRDT merging using line-level replace operations.
-- [x] Real-time terminal text refreshing to reflect changes.
-- [x] Graceful clean shutdown with signal handling.
-- [x] Portable design running on macOS and Linux without `mqueue.h`.
-
-### Future enhancements planned:
-- Fine-grained insert and delete operations in CRDT for better concurrency.
-- GUI or richer terminal interface.
-- More robust conflict resolution.
-- Network support beyond local Unix socket based IPC.
-
----
-
-## Building and Running
+### Building and Running Example
 ```
-make
+make clean && make
 
-# run as user 1 watching file.txt and connected to user 2 and 3
-./sync_text 1 file.txt /tmp/user_2.sock /tmp/user_3.sock 
+Terminal 1 (User 1)
+./sync_text 1
 
-# run as user 2
-./sync_text 2 file.txt /tmp/user_1.sock /tmp/user_3.sock 
+Terminal 2 (User 2)
+./sync_text 2
 
-# run as user 3
-./sync_text 3 file.txt /tmp/user_1.sock /tmp/user_2.sock
+Terminal 3 (User 3)
+./sync_text 3
 ```
+
+#### Each user gets their own:
+- Local document: `local_docs/<user_id>_doc.txt`
+- Unix socket: `/tmp/user_<user_id>.sock`

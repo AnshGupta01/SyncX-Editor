@@ -1,6 +1,8 @@
-// The receiver is a server accepting multiple client connections.
-
 #include "reciever.h"
+#include "crdt.h"
+#include "utils.h"
+#include "syncQueue.h"
+#include "operation.h"
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <stdio.h>
@@ -8,12 +10,10 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <string.h>
-#include "crdt.h"             // For crdt_merge_operation()
-#include "utils.h"            // For utils_refresh_terminal_display()
 
 #define MAX_CONNECTION_QUEUE 5
 
-static void process_received_operation(const Operation* op);
+extern char local_doc_path[512];
 
 static int server_fd = -1;
 static SyncQueue* recv_queue = NULL;
@@ -21,12 +21,17 @@ static pthread_t receiver_thread;
 static volatile int running = 0;
 static char socket_path[108];
 
+static void process_received_operation(const Operation* op);
+
 static void* receiver_loop(void* arg) {
     (void)arg;
+    
     while (running) {
         int client_fd = accept(server_fd, NULL, NULL);
         if (client_fd < 0) {
-            perror("accept");
+            if (running) {
+                perror("accept");
+            }
             continue;
         }
 
@@ -41,10 +46,17 @@ static void* receiver_loop(void* arg) {
     return NULL;
 }
 
+static void process_received_operation(const Operation* op) {
+    crdt_merge_operation(op);
+    crdt_save_to_file(local_doc_path);
+    utils_refresh_terminal_display();
+}
+
 bool receiver_init(int user_id, SyncQueue* in_queue) {
     snprintf(socket_path, sizeof(socket_path), "/tmp/user_%d.sock", user_id);
 
     unlink(socket_path);
+
     server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (server_fd < 0) {
         perror("socket");
@@ -54,6 +66,7 @@ bool receiver_init(int user_id, SyncQueue* in_queue) {
     struct sockaddr_un addr = {0};
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
+
     if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         perror("bind");
         close(server_fd);
@@ -77,13 +90,17 @@ void receiver_start(void) {
 
 void receiver_stop(void) {
     running = 0;
-    shutdown(server_fd, SHUT_RDWR);
-    pthread_join(receiver_thread, NULL);
-    close(server_fd);
-    unlink(socket_path);
-}
+    
+    if (server_fd >= 0) {
+        shutdown(server_fd, SHUT_RDWR);
+    }
 
-static void process_received_operation(const Operation* op) {
-    crdt_merge_operation(op);
-    utils_refresh_terminal_display();
+    pthread_join(receiver_thread, NULL);
+
+    if (server_fd >= 0) {
+        close(server_fd);
+        server_fd = -1;
+    }
+
+    unlink(socket_path);
 }

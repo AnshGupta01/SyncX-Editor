@@ -12,13 +12,14 @@
 
 
 typedef struct {
-    char op_type;       // Insert ('I'), Delete ('D'), Replace ('R'), use R for simplicity
-    int line_no;
-    int col_start;
-    int col_end;
-    char new_text[MAX_TEXT_LENGTH];
-    time_t timestamp;
-    int user_id;
+    int user_id;              // Which user made the edit
+    char op_type;             // 'R' for replace
+    int line_no;              // Line number changed
+    int col_start;            // Reserved for detailed changes
+    int col_end;              // Reserved for detailed changes
+    char old_text[1024];      // Stores the pre-change content
+    char new_text[1024];      // Stores the post-change content
+    time_t timestamp;         // When the change was made
 } Operation;
 
 // Struct to byte buffer

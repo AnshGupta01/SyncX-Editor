@@ -15,7 +15,9 @@
 #define LOCAL_DOCS_DIR "local_docs"
 #define TEMPLATE_FILE "template.txt"
 
-static volatile int running = 1;
+// Global variables for shared access
+char local_doc_path[512];
+static volatile sig_atomic_t running = 1;
 
 static void handle_signal(int sig) {
     (void)sig;
@@ -84,7 +86,6 @@ int main(int argc, char* argv[]) {
 
     ensure_directory(LOCAL_DOCS_DIR);
 
-    char local_doc_path[512];
     char socket_path[108];
     build_local_doc_path(user_id, local_doc_path, sizeof(local_doc_path));
     build_socket_path(user_id, socket_path, sizeof(socket_path));
@@ -114,6 +115,10 @@ int main(int argc, char* argv[]) {
 
     if (!watcher_init(local_doc_path, op_queue, user_id)) {
         fprintf(stderr, "Watcher init failed\n");
+        crdt_destroy();
+        sync_queue_destroy(op_queue);
+        registry_unregister_user(user_id);
+        registry_cleanup();
         return 1;
     }
 
@@ -125,19 +130,24 @@ int main(int argc, char* argv[]) {
         peer_paths[i] = peer_sockets[i];
     }
 
-    if (!broadcaster_init_unix(peer_paths, peer_count, op_queue)) {
-        fprintf(stderr, "Broadcaster init failed\n");
-        return 1;
+    if (!broadcaster_init(peer_paths, peer_count, op_queue)) {
+        fprintf(stderr, "Broadcaster init failed (no peers available yet)\n");
     }
 
-    if (!receiver_init_unix(user_id, op_queue)) {
+    if (!receiver_init(user_id, op_queue)) {
         fprintf(stderr, "Receiver init failed\n");
+        watcher_stop();
+        broadcaster_stop();
+        crdt_destroy();
+        sync_queue_destroy(op_queue);
+        registry_unregister_user(user_id);
+        registry_cleanup();
         return 1;
     }
 
     watcher_start(100);
-    broadcaster_start_unix();
-    receiver_start_unix();
+    broadcaster_start();
+    receiver_start();
 
     printf("SyncText started for user %d\n", user_id);
     printf("Watching: %s\n", local_doc_path);
@@ -151,14 +161,18 @@ int main(int argc, char* argv[]) {
     printf("\nShutting down...\n");
 
     watcher_stop();
-    broadcaster_stop_unix();
-    receiver_stop_unix();
+    broadcaster_stop();
+    receiver_stop();
 
     crdt_destroy();
     sync_queue_destroy(op_queue);
 
     registry_unregister_user(user_id);
     registry_cleanup();
+
+    if (remove(local_doc_path) == 0) {
+        printf("Deleted local document: %s\n", local_doc_path);
+    }
 
     printf("Cleanup complete\n");
 
