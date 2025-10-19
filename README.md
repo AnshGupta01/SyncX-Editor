@@ -13,6 +13,7 @@ SyncText/
 │   ├── receiver.h
 │   ├── operation.h
 │   ├── sync_queue.h
+│   ├── registry.h
 │   └── utils.h
 │
 ├── src/
@@ -21,6 +22,7 @@ SyncText/
 │   ├── watcher.c
 │   ├── broadcaster.c
 │   ├── receiver.c
+│   ├── registry.c
 │   ├── sync_queue.c
 │   └── utils.c
 │
@@ -50,6 +52,7 @@ The project is designed to be portable and runs on both Linux and macOS platform
 - ✅ Unix Domain Socket based IPC (macOS & Linux compatible)
 - ✅ Lock-free concurrent programming
 - ✅ Separate local document copies per user
+- ✅ Local document: `local_docs/<user_id>_doc.txt`
 
 ### Components and Architecture
 
@@ -89,7 +92,3 @@ Terminal 2 (User 2)
 Terminal 3 (User 3)
 ./sync_text 3
 ```
-
-#### Each user gets their own:
-- Local document: `local_docs/<user_id>_doc.txt`
-- Unix socket: `/tmp/user_<user_id>.sock`
