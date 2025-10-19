@@ -1,18 +1,11 @@
 CC = gcc
 CFLAGS = -Iinclude -Wall -Wextra -g -pthread
-
-UNAME_S := $(shell uname -s)
-
-ifeq ($(UNAME_S),Linux)
-    LDFLAGS = -pthread -lrt
-else
-    LDFLAGS = -pthread
-endif
-
+LDFLAGS = -pthread -lrt
 
 SRCDIR = src
 BUILDDIR = build
-TARGET = sync_text
+INCDIR = include
+TARGET = sync
 
 SRC = $(wildcard $(SRCDIR)/*.c)
 OBJ = $(patsubst $(SRCDIR)/%.c, $(BUILDDIR)/%.o, $(SRC))
@@ -32,10 +25,9 @@ $(BUILDDIR)/%.o: $(SRCDIR)/%.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILDDIR):
-	mkdir -p $(BUILDDIR)
+	@mkdir -p $(BUILDDIR)
 
 clean:
 	rm -rf $(BUILDDIR) $(TARGET)
-	rm -f /tmp/user_*.sock
-	rm -f /dev/shm/synctext_registry
+	rm -f /dev/shm/synctext_registry /dev/mqueue/queue_user_*
 	rm -rf local_docs/*.txt

@@ -16,7 +16,11 @@ bool registry_init(void) {
         return false;
     }
 
-    ftruncate(shm_fd, sizeof(UserRegistry));
+    if (ftruncate(shm_fd, sizeof(UserRegistry)) < 0) {
+        perror("ftruncate");
+        close(shm_fd);
+        return false;
+    }
     
     registry = mmap(NULL, sizeof(UserRegistry), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (registry == MAP_FAILED) {
@@ -28,26 +32,22 @@ bool registry_init(void) {
     return true;
 }
 
-static void cleanup_stale_user(int user_id) {
-    if (!registry) return;
-    for (int i = 0; i < registry->count; i++) {
-        if (registry->users[i].user_id == user_id && registry->users[i].active) {
-            registry->users[i].active = 0;
-            printf("Cleaned up stale entry for user %d\n", user_id);
-            break;
-        }
-    }
-}
-
-bool registry_register_user(int user_id, const char* socket_path) {
+bool registry_register_user(int user_id, const char* queue_name) {
     if (!registry) return false;
 
-    cleanup_stale_user(user_id);
+    // Clean stale entry
+    for (int i = 0; i < MAX_USERS; i++) {
+        if (registry->users[i].user_id == user_id && registry->users[i].active) {
+            registry->users[i].active = 0;
+            printf("Cleaned stale entry for user_%d\n", user_id);
+        }
+    }
 
+    // Register
     for (int i = 0; i < MAX_USERS; i++) {
         if (registry->users[i].active == 0) {
             registry->users[i].user_id = user_id;
-            strncpy(registry->users[i].socket_path, socket_path, sizeof(registry->users[i].socket_path) - 1);
+            strncpy(registry->users[i].queue_name, queue_name, QUEUE_NAME_LEN - 1);
             registry->users[i].active = 1;
             
             if (i >= registry->count) {
@@ -71,13 +71,14 @@ bool registry_unregister_user(int user_id) {
     return false;
 }
 
-int registry_get_active_users(char socket_paths[][108], int max_users, int exclude_user_id) {
+int registry_get_active_users(int user_ids[], char queue_names[][QUEUE_NAME_LEN], int max_users, int exclude_user_id) {
     if (!registry) return 0;
 
     int count = 0;
     for (int i = 0; i < registry->count && count < max_users; i++) {
         if (registry->users[i].active && registry->users[i].user_id != exclude_user_id) {
-            strncpy(socket_paths[count], registry->users[i].socket_path, 108);
+            user_ids[count] = registry->users[i].user_id;
+            strncpy(queue_names[count], registry->users[i].queue_name, QUEUE_NAME_LEN);
             count++;
         }
     }

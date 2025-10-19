@@ -1,48 +1,37 @@
 #include "broadcaster.h"
-#include "syncQueue.h"
-#include "operation.h"
-#include <sys/socket.h>
-#include <sys/un.h>
+#include "registry.h"
+#include <mqueue.h>
 #include <stdio.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <pthread.h>
 #include <string.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <errno.h>
 
-#define MAX_PEERS 10
+#define OP_BUFFER_SIZE 10
+#define BATCH_SIZE 1  // Send immediately
 
-static int peer_fds[MAX_PEERS];
-static int num_peers = 0;
-static SyncQueue* queue = NULL;
+static Operation op_buffer[OP_BUFFER_SIZE];
+static volatile int op_count = 0;
 static pthread_t broadcaster_thread;
 static volatile int running = 0;
 
-static int connect_to_peer(const char* socket_path) {
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) {
-        perror("socket");
-        return -1;
-    }
+static int peer_ids[MAX_USERS];
+static char peer_queues[MAX_USERS][64];
+static int peer_count = 0;
 
-    struct sockaddr_un addr = {0};
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
-
-    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        close(fd);
-        return -1;
-    }
-
-    return fd;
-}
-
-static void send_operation_to_peers(const Operation* op) {
-    for (int i = 0; i < num_peers; i++) {
-        if (peer_fds[i] >= 0) {
-            ssize_t sent = send(peer_fds[i], op, sizeof(Operation), 0);
-            if (sent < 0) {
-                perror("send to peer");
+static void send_to_peers(const Operation* op) {
+    for (int i = 0; i < peer_count; i++) {
+        mqd_t mq = mq_open(peer_queues[i], O_WRONLY | O_NONBLOCK);
+        if (mq != (mqd_t)-1) {
+            int result = mq_send(mq, (const char*)op, sizeof(Operation), 0);
+            if (result == 0) {
+                printf("[DEBUG] Sent operation to %s (line %d)\n", peer_queues[i], op->line_no);
+            } else {
+                printf("[DEBUG] Failed to send to %s: %s\n", peer_queues[i], strerror(errno));
             }
+            mq_close(mq);
+        } else {
+            printf("[DEBUG] Could not open queue %s: %s\n", peer_queues[i], strerror(errno));
         }
     }
 }
@@ -50,31 +39,29 @@ static void send_operation_to_peers(const Operation* op) {
 static void* broadcaster_loop(void* arg) {
     (void)arg;
     
-    Operation op;
     while (running) {
-        if (sync_queue_dequeue(queue, &op)) {
-            send_operation_to_peers(&op);
-        } else {
-            usleep(1000);
+        if (op_count > 0) {  // Send any operation in buffer immediately
+            for (int i = 0; i < op_count; i++) {
+                send_to_peers(&op_buffer[i]);
+            }
+            op_count = 0;
         }
+        usleep(100000);  // Check every 0.1 seconds
     }
     return NULL;
 }
 
-bool broadcaster_init(const char* peer_queues_in[], int num_peers_in, SyncQueue* in_queue) {
-    num_peers = 0;
-    queue = in_queue;
-
-    for (int i = 0; i < num_peers_in && i < MAX_PEERS; i++) {
-        peer_fds[num_peers] = connect_to_peer(peer_queues_in[i]);
-        if (peer_fds[num_peers] >= 0) {
-            num_peers++;
-        } else {
-            fprintf(stderr, "Failed to connect to peer: %s\n", peer_queues_in[i]);
-        }
-    }
-
+bool broadcaster_init(void) {
+    op_count = 0;
+    peer_count = 0;
     return true;
+}
+
+void broadcaster_add_operation(const Operation* op) {
+    if (op_count < OP_BUFFER_SIZE) {
+        memcpy(&op_buffer[op_count], op, sizeof(Operation));
+        op_count++;
+    }
 }
 
 void broadcaster_start(void) {
@@ -85,11 +72,12 @@ void broadcaster_start(void) {
 void broadcaster_stop(void) {
     running = 0;
     pthread_join(broadcaster_thread, NULL);
+}
 
-    for (int i = 0; i < num_peers; i++) {
-        if (peer_fds[i] >= 0) {
-            close(peer_fds[i]);
-            peer_fds[i] = -1;
-        }
+void broadcaster_update_peers(int user_ids[], char queue_names[][64], int count) {
+    peer_count = count;
+    for (int i = 0; i < count; i++) {
+        peer_ids[i] = user_ids[i];
+        strncpy(peer_queues[i], queue_names[i], 64);
     }
 }

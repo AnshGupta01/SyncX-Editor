@@ -7,10 +7,10 @@
 
 void crdt_init(void);
 void crdt_destroy(void);
-void crdt_merge_operation(const Operation* op);
-
+bool crdt_merge_operation(const Operation* op);
 char** crdt_get_document_lines(void);
 size_t crdt_get_line_count(void);
 void crdt_save_to_file(const char* filepath);
+void crdt_load_from_file(const char* filepath);
 
 #endif

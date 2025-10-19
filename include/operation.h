@@ -4,30 +4,18 @@
 
 #ifndef OPERATION_H
 #define OPERATION_H
-
 #include <time.h>
-#include <stddef.h>
-
-#define MAX_TEXT_LENGTH 128
-
+#define MAX_TEXT_LEN 1024
 
 typedef struct {
-    int user_id;              // Which user made the edit
-    char op_type;             // 'R' for replace
-    int line_no;              // Line number changed
-    int col_start;            // Reserved for detailed changes
-    int col_end;              // Reserved for detailed changes
-    char old_text[1024];      // Stores the pre-change content
-    char new_text[1024];      // Stores the post-change content
-    time_t timestamp;         // When the change was made
+    int user_id;
+    char op_type;           // 'I' = insert, 'D' = delete, 'R' = replace
+    int line_no;
+    int col_start;
+    int col_end;
+    char old_text[MAX_TEXT_LEN];
+    char new_text[MAX_TEXT_LEN];
+    time_t timestamp;
 } Operation;
-
-// Struct to byte buffer
-void serialize_operation(const Operation* op, char* buffer);
-
-// Byte buffer to struct
-void deserialize_operation(const char* buffer, Operation* op);
-
-size_t get_serialized_operation_size(void);
 
 #endif

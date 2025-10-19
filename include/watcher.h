@@ -1,17 +1,13 @@
-// Handles file monitoring (using stat()), detects changed lines, computes differences, and generates Operation objects.
-
 #ifndef WATCHER_H
 #define WATCHER_H
 
 #include <stdbool.h>
 #include "operation.h"
-#include "syncQueue.h"
 
-bool watcher_init(const char* filepath, SyncQueue* out_queue, int user_id);
+typedef void (*OperationCallback)(const Operation* op);
 
-// Detects changes every interval_ms milliseconds and pushes Operation objects to out_queue
-void watcher_start(int interval_ms);
-
+bool watcher_init(const char* file_path, int user_id, OperationCallback callback);
+void watcher_start(void);
 void watcher_stop(void);
 
 #endif

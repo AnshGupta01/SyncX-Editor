@@ -1,23 +1,35 @@
 #include "utils.h"
-#include "crdt.h"
 #include <stdio.h>
-#include <string.h>
+#include <time.h>
 
-void utils_refresh_terminal_display(void) {
-    printf("\033[H\033[J");
-    printf("=== SyncText Document ===\n\n");
-
-    char** document_lines = crdt_get_document_lines();
-    size_t line_count = crdt_get_line_count();
-
+void utils_display_document(const char* doc_name, int user_id, char** lines, size_t line_count, 
+                           int active_users[], int active_count, const char* last_change) {
+    printf("\033[H\033[J");  // Clear screen
+    
+    time_t now = time(NULL);
+    struct tm* tm_info = localtime(&now);
+    char time_buf[64];
+    strftime(time_buf, sizeof(time_buf), "%H:%M:%S", tm_info);
+    
+    printf("Document: %s\n", doc_name);
+    printf("Last updated: %s\n", time_buf);
+    printf("----------------------------------------\n");
+    
     for (size_t i = 0; i < line_count; i++) {
-        printf("%zu: %s", i + 1, document_lines[i]);
-        size_t len = strlen(document_lines[i]);
-        if (len > 0 && document_lines[i][len - 1] != '\n') {
-            printf("\n");
-        }
+        printf("Line %zu: %s", i, lines[i]);
     }
-
-    printf("\n=== End of Document ===\n");
+    
+    printf("----------------------------------------\n");
+    printf("Active users: ");
+    for (int i = 0; i < active_count; i++) {
+        printf("user_%d%s", active_users[i], (i < active_count - 1) ? ", " : "");
+    }
+    printf("\n");
+    
+    if (last_change) {
+        printf("%s\n", last_change);
+    }
+    
+    printf("Monitoring for changes...\n");
     fflush(stdout);
 }

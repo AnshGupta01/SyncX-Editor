@@ -1,6 +1,4 @@
 #include "watcher.h"
-#include "syncQueue.h"
-#include "operation.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,12 +6,13 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <time.h>
 
 static char* filepath = NULL;
-static SyncQueue* op_queue = NULL;
 static int user_id_global = 0;
 static pthread_t watcher_thread;
 static volatile bool running = false;
+static OperationCallback op_callback = NULL;
 
 static char** old_lines = NULL;
 static size_t old_line_count = 0;
@@ -47,12 +46,12 @@ static void free_lines(char** lines, size_t count) {
     free(lines);
 }
 
-static void detect_changes_and_enqueue(char** old, size_t old_count, char** new, size_t new_count) {
+static void detect_changes_and_callback(char** old, size_t old_count, char** new_lines, size_t new_count) {
     size_t max_count = (old_count > new_count) ? old_count : new_count;
 
     for (size_t i = 0; i < max_count; i++) {
         const char* old_line = (i < old_count) ? old[i] : "";
-        const char* new_line = (i < new_count) ? new[i] : "";
+        const char* new_line = (i < new_count) ? new_lines[i] : "";
 
         if (strcmp(old_line, new_line) != 0) {
             Operation op;
@@ -61,14 +60,13 @@ static void detect_changes_and_enqueue(char** old, size_t old_count, char** new,
             op.line_no = (int)i;
             op.col_start = 0;
             op.col_end = 0;
-            
-            // Use snprintf for safer string copying
-            snprintf(op.old_text, sizeof(op.old_text), "%s", old_line);
-            snprintf(op.new_text, sizeof(op.new_text), "%s", new_line);
-            
+            snprintf(op.old_text, MAX_TEXT_LEN, "%s", old_line);
+            snprintf(op.new_text, MAX_TEXT_LEN, "%s", new_line);
             op.timestamp = time(NULL);
 
-            sync_queue_enqueue(op_queue, &op);
+            if (op_callback) {
+                op_callback(&op);
+            }
         }
     }
 }
@@ -84,21 +82,21 @@ static void* watcher_loop(void* arg) {
 
             char** new_lines = NULL;
             size_t new_count = read_file_lines(filepath, &new_lines);
-            detect_changes_and_enqueue(old_lines, old_line_count, new_lines, new_count);
+            detect_changes_and_callback(old_lines, old_line_count, new_lines, new_count);
 
             free_lines(old_lines, old_line_count);
             old_lines = new_lines;
             old_line_count = new_count;
         }
-        usleep(100000);
+        usleep(500000); // Check every 0.5 seconds
     }
     return NULL;
 }
 
-bool watcher_init(const char* file_path, SyncQueue* queue, int user_id) {
+bool watcher_init(const char* file_path, int user_id, OperationCallback callback) {
     filepath = strdup(file_path);
-    op_queue = queue;
     user_id_global = user_id;
+    op_callback = callback;
 
     old_lines = NULL;
     old_line_count = read_file_lines(filepath, &old_lines);
@@ -106,8 +104,7 @@ bool watcher_init(const char* file_path, SyncQueue* queue, int user_id) {
     return true;
 }
 
-void watcher_start(int interval_ms) {
-    (void)interval_ms;
+void watcher_start(void) {
     running = true;
     pthread_create(&watcher_thread, NULL, watcher_loop, NULL);
 }

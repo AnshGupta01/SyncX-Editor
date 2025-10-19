@@ -4,69 +4,59 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "syncQueue.h"
+#include "registry.h"
+#include "crdt.h"
 #include "watcher.h"
 #include "broadcaster.h"
-#include "reciever.h"
-#include "crdt.h"
+#include "receiver.h"
 #include "utils.h"
-#include "registry.h"
 
 #define LOCAL_DOCS_DIR "local_docs"
-#define TEMPLATE_FILE "template.txt"
 
-// Global variables for shared access
-char local_doc_path[512];
 static volatile sig_atomic_t running = 1;
+static int current_user_id = 0;
+static char local_doc_path[256];
+static char last_change_msg[512] = "No changes yet";
 
 static void handle_signal(int sig) {
     (void)sig;
     running = 0;
 }
 
-void build_local_doc_path(int user_id, char* buf, size_t bufsize) {
-    snprintf(buf, bufsize, "%s/%d_doc.txt", LOCAL_DOCS_DIR, user_id);
-}
+static void refresh_peer_list_and_display(int include_self) {
+    int active_ids[MAX_USERS];
+    char active_queues[MAX_USERS][64];
+    int active_count = registry_get_active_users(active_ids, active_queues, MAX_USERS, current_user_id);
+    if (include_self) active_ids[active_count++] = current_user_id; // Include self last
 
-void build_socket_path(int user_id, char* buf, size_t bufsize) {
-    snprintf(buf, bufsize, "/tmp/user_%d.sock", user_id);
-}
+    utils_display_document(local_doc_path, current_user_id, crdt_get_document_lines(), 
+                          crdt_get_line_count(), active_ids, active_count, last_change_msg);
 
-int file_exists(const char* path) {
-    struct stat st;
-    return (stat(path, &st) == 0);
-}
+    // Also update broadcaster peers
+    active_count = registry_get_active_users(active_ids, active_queues, MAX_USERS, current_user_id);
+    broadcaster_update_peers(active_ids, active_queues, active_count);
 
-void ensure_directory(const char* dir) {
-    struct stat st = {0};
-    if (stat(dir, &st) == -1) {
-        mkdir(dir, 0700);
+    printf("[DEBUG] Found %d peers:\n", active_count);
+    for (int i = 0; i < active_count; i++) {
+        printf("  - user_%d @ %s\n", active_ids[i], active_queues[i]);
     }
 }
 
-void initialize_local_copy(const char* local_path, const char* template_path) {
-    if (!file_exists(local_path)) {
-        FILE* src = fopen(template_path, "r");
-        FILE* dest = fopen(local_path, "w");
+static void on_local_change(const Operation* op) {
+    snprintf(last_change_msg, sizeof(last_change_msg), 
+             "Change detected: Line %d modified by user_%d", op->line_no, op->user_id);
+    broadcaster_add_operation(op);
+    crdt_merge_operation(op);
+    crdt_save_to_file(local_doc_path);
+    refresh_peer_list_and_display(1);
+}
 
-        if (!dest) {
-            fprintf(stderr, "Failed to create local doc %s\n", local_path);
-            return;
-        }
-
-        if (src) {
-            char buf[4096];
-            size_t n;
-            while ((n = fread(buf, 1, sizeof(buf), src)) > 0) {
-                fwrite(buf, 1, n, dest);
-            }
-            fclose(src);
-        } else {
-            fprintf(dest, "Welcome to SyncText!\n");
-        }
-
-        fclose(dest);
-    }
+static void on_remote_operation(const Operation* op) {
+    snprintf(last_change_msg, sizeof(last_change_msg), 
+             "Received update from user_%d: Line %d modified", op->user_id, op->line_no);
+    crdt_merge_operation(op);
+    crdt_save_to_file(local_doc_path);
+    refresh_peer_list_and_display(1);
 }
 
 int main(int argc, char* argv[]) {
@@ -75,87 +65,62 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    int user_id = atoi(argv[1]);
-    if (user_id < 1 || user_id > MAX_USERS) {
-        fprintf(stderr, "User ID must be between 1 and %d\n", MAX_USERS);
-        return 1;
-    }
-
+    current_user_id = atoi(argv[1]);
     signal(SIGINT, handle_signal);
-    signal(SIGTERM, handle_signal);
 
-    ensure_directory(LOCAL_DOCS_DIR);
+    mkdir(LOCAL_DOCS_DIR, 0755);
+    snprintf(local_doc_path, sizeof(local_doc_path), "%s/user_%d_doc.txt", LOCAL_DOCS_DIR, current_user_id);
 
-    char socket_path[108];
-    build_local_doc_path(user_id, local_doc_path, sizeof(local_doc_path));
-    build_socket_path(user_id, socket_path, sizeof(socket_path));
-
-    initialize_local_copy(local_doc_path, TEMPLATE_FILE);
+    // Create initial document if not exists
+    FILE* f = fopen(local_doc_path, "a+");
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        if (ftell(f) == 0) {
+            fprintf(f, "Line 0: Hello World\n");
+            fprintf(f, "Line 1: This is a collaborative editor\n");
+            fprintf(f, "Line 2: Welcome to SyncText\n");
+            fprintf(f, "Line 3: Edit this document and see real-time updates\n");
+        }
+        fclose(f);
+    }
 
     if (!registry_init()) {
         fprintf(stderr, "Failed to initialize registry\n");
         return 1;
     }
 
-    if (!registry_register_user(user_id, socket_path)) {
+    char queue_name[64];
+    snprintf(queue_name, sizeof(queue_name), "/queue_user_%d", current_user_id);
+
+    if (!registry_register_user(current_user_id, queue_name)) {
         fprintf(stderr, "Failed to register user\n");
         registry_cleanup();
         return 1;
     }
 
-    SyncQueue* op_queue = sync_queue_create();
-    if (!op_queue) {
-        fprintf(stderr, "Failed to create operation queue\n");
-        registry_unregister_user(user_id);
-        registry_cleanup();
-        return 1;
-    }
-
     crdt_init();
+    crdt_load_from_file(local_doc_path);
 
-    if (!watcher_init(local_doc_path, op_queue, user_id)) {
-        fprintf(stderr, "Watcher init failed\n");
-        crdt_destroy();
-        sync_queue_destroy(op_queue);
-        registry_unregister_user(user_id);
-        registry_cleanup();
-        return 1;
-    }
+    watcher_init(local_doc_path, current_user_id, on_local_change);
+    broadcaster_init();
+    receiver_init(current_user_id, on_remote_operation);
 
-    char peer_sockets[MAX_USERS][108];
-    int peer_count = registry_get_active_users(peer_sockets, MAX_USERS, user_id);
-    
-    const char* peer_paths[MAX_USERS];
-    for (int i = 0; i < peer_count; i++) {
-        peer_paths[i] = peer_sockets[i];
-    }
+    // Print peer info and update to broadcaster
+    refresh_peer_list_and_display(1);
 
-    if (!broadcaster_init(peer_paths, peer_count, op_queue)) {
-        fprintf(stderr, "Broadcaster init failed (no peers available yet)\n");
-    }
-
-    if (!receiver_init(user_id, op_queue)) {
-        fprintf(stderr, "Receiver init failed\n");
-        watcher_stop();
-        broadcaster_stop();
-        crdt_destroy();
-        sync_queue_destroy(op_queue);
-        registry_unregister_user(user_id);
-        registry_cleanup();
-        return 1;
-    }
-
-    watcher_start(100);
+    watcher_start();
     broadcaster_start();
     receiver_start();
 
-    printf("SyncText started for user %d\n", user_id);
-    printf("Watching: %s\n", local_doc_path);
-    printf("Socket: %s\n", socket_path);
-    printf("Connected peers: %d\n\n", peer_count);
+    printf("Registered as user_%d\n", current_user_id);
+    printf("Message queue created: %s\n", queue_name);
+
+    // Initial display
+    refresh_peer_list_and_display(1);
 
     while (running) {
-        sleep(1);
+        sleep(2);
+        refresh_peer_list_and_display(1);  // Periodically refresh peer list for new users
     }
 
     printf("\nShutting down...\n");
@@ -163,18 +128,10 @@ int main(int argc, char* argv[]) {
     watcher_stop();
     broadcaster_stop();
     receiver_stop();
-
     crdt_destroy();
-    sync_queue_destroy(op_queue);
-
-    registry_unregister_user(user_id);
+    registry_unregister_user(current_user_id);
     registry_cleanup();
 
-    if (remove(local_doc_path) == 0) {
-        printf("Deleted local document: %s\n", local_doc_path);
-    }
-
     printf("Cleanup complete\n");
-
     return 0;
 }
