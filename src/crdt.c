@@ -1,61 +1,201 @@
+#define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE
+
 #include "crdt.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
+#include <time.h>
+#include <unistd.h>
+#include <errno.h>
 
 static char** document_lines = NULL;
 static size_t line_count = 0;
 static size_t line_capacity = 0;
 
+typedef struct {
+    time_t timestamp;
+    int user_id;
+} LineMetadata;
+
+static LineMetadata* line_metadata = NULL;
+
 static void ensure_line_capacity(size_t n) {
+    if (n == 0) return;
+
     if (line_capacity < n) {
         size_t old_capacity = line_capacity;
-        line_capacity = n + 10;
-        
-        document_lines = realloc(document_lines, line_capacity * sizeof(char*));
+        line_capacity = n + 20;
+
+        char** new_doc_lines = realloc(document_lines, line_capacity * sizeof(char*));
+        LineMetadata* new_meta = realloc(line_metadata, line_capacity * sizeof(LineMetadata));
+
+        if (!new_doc_lines || !new_meta) {
+            fprintf(stderr, "[CRDT] Memory allocation failed\n");
+            exit(1);
+        }
+
+        document_lines = new_doc_lines;
+        line_metadata = new_meta;
+
         for (size_t i = old_capacity; i < line_capacity; i++) {
             document_lines[i] = NULL;
+            line_metadata[i].timestamp = 0;
+            line_metadata[i].user_id = -1;
         }
     }
-    
-    if (line_count < n) {
-        for (size_t i = line_count; i < n; i++) {
-            if (!document_lines[i]) {
-                document_lines[i] = strdup("\n");
+
+    while (line_count < n) {
+        if (document_lines[line_count] == NULL) {
+            document_lines[line_count] = strdup("\n");
+            if (!document_lines[line_count]) {
+                fprintf(stderr, "[CRDT] String allocation failed at line %zu\n", line_count);
+                exit(1);
             }
+            line_metadata[line_count].timestamp = 0;
+            line_metadata[line_count].user_id = -1;
         }
-        line_count = n;
+        line_count++;
+    }
+}
+
+static void shrink_document(void) {
+    while(line_count > 0 && document_lines[line_count - 1] && strcmp(document_lines[line_count - 1], "\n") == 0) {
+        free(document_lines[line_count - 1]);
+        document_lines[line_count - 1] = NULL;
+        line_metadata[line_count - 1].timestamp = 0;
+        line_metadata[line_count - 1].user_id = -1;
+        line_count--;
     }
 }
 
 void crdt_init(void) {
-    document_lines = NULL;
+    if (document_lines) {
+        for (size_t i = 0; i < line_capacity; i++) {
+            free(document_lines[i]);
+        }
+        free(document_lines);
+        document_lines = NULL;
+    }
+    if (line_metadata) {
+        free(line_metadata);
+        line_metadata = NULL;
+    }
     line_count = 0;
     line_capacity = 0;
 }
 
 void crdt_destroy(void) {
-    for (size_t i = 0; i < line_capacity; i++) {
-        free(document_lines[i]);
+    if (document_lines) {
+        for (size_t i = 0; i < line_capacity; i++) {
+            free(document_lines[i]);
+        }
+        free(document_lines);
+        document_lines = NULL;
     }
-    free(document_lines);
-    document_lines = NULL;
+    if (line_metadata) {
+        free(line_metadata);
+        line_metadata = NULL;
+    }
     line_count = 0;
     line_capacity = 0;
 }
 
+static bool should_apply_operation(const Operation* op, int line_no) {
+    if (line_no < 0 || (size_t)line_no >= line_count) {
+        return true;
+    }
+    if (!line_metadata) return true;
+
+    LineMetadata* meta = &line_metadata[line_no];
+
+    if (meta->timestamp == 0) {
+        return true;
+    }
+    if (op->timestamp > meta->timestamp) {
+        return true;
+    } else if (op->timestamp == meta->timestamp) {
+        return op->user_id < meta->user_id;
+    }
+    return false;
+}
+
 bool crdt_merge_operation(const Operation* op) {
-    if (op->line_no < 0) return false;
+    if (!op || op->line_no < 0) {
+        fprintf(stderr, "[CRDT] Invalid operation or line number\n");
+        return false;
+    }
 
     ensure_line_capacity((size_t)op->line_no + 1);
 
-    if (op->op_type == 'R') {
-        free(document_lines[op->line_no]);
+    if (!should_apply_operation(op, op->line_no)) {
+        return false;
+    }
+
+    if (document_lines == NULL || line_metadata == NULL) {
+        fprintf(stderr, "[CRDT] Internal structures not initialized\n");
+        return false;
+    }
+
+    if (op->op_type == 'R' || op->op_type == 'I') {
+        if (document_lines[op->line_no]) {
+            free(document_lines[op->line_no]);
+        }
         document_lines[op->line_no] = strdup(op->new_text);
+
+        if (!document_lines[op->line_no]) {
+            fprintf(stderr, "[CRDT] String allocation failed\n");
+            return false;
+        }
+
+        line_metadata[op->line_no].timestamp = op->timestamp;
+        line_metadata[op->line_no].user_id = op->user_id;
+
+        return true;
+    } else if (op->op_type == 'D') {
+        if (document_lines[op->line_no]) {
+            free(document_lines[op->line_no]);
+        }
+        document_lines[op->line_no] = strdup("\n");
+
+        if (!document_lines[op->line_no]) {
+            fprintf(stderr, "[CRDT] String allocation failed\n");
+            return false;
+        }
+
+        line_metadata[op->line_no].timestamp = op->timestamp;
+        line_metadata[op->line_no].user_id = op->user_id;
+
         return true;
     }
-    
+
     return false;
+}
+
+int crdt_merge_batch(Operation ops[], int count) {
+    if (count <= 0 || !ops) return 0;
+
+    for (int i = 0; i < count - 1; i++) {
+        for (int j = i + 1; j < count; j++) {
+            if (ops[i].timestamp > ops[j].timestamp ||
+                (ops[i].timestamp == ops[j].timestamp && ops[i].user_id > ops[j].user_id)) {
+                Operation temp = ops[i];
+                ops[i] = ops[j];
+                ops[j] = temp;
+            }
+        }
+    }
+
+    int applied = 0;
+    for (int i = 0; i < count; i++) {
+        if (crdt_merge_operation(&ops[i])) {
+            applied++;
+        }
+    }
+
+    shrink_document();
+
+    return applied;
 }
 
 char** crdt_get_document_lines(void) {
@@ -67,37 +207,39 @@ size_t crdt_get_line_count(void) {
 }
 
 void crdt_save_to_file(const char* filepath) {
+    if (!filepath) return;
     FILE* f = fopen(filepath, "w");
-    if (!f) {
-        perror("Failed to save document");
-        return;
-    }
-    
+    if (!f) return;
+
     for (size_t i = 0; i < line_count; i++) {
         if (document_lines[i]) {
             fputs(document_lines[i], f);
+        } else {
+            fputs("\n", f);
         }
     }
-    
+
     fclose(f);
 }
 
 void crdt_load_from_file(const char* filepath) {
+    if (!filepath) return;
     FILE* f = fopen(filepath, "r");
     if (!f) return;
-    
-    char* line = NULL;
-    size_t len = 0;
-    ssize_t nread;
+
+    char buffer[4096];
     size_t idx = 0;
 
-    while ((nread = getline(&line, &len, f)) != -1) {
+    while (fgets(buffer, sizeof(buffer), f)) {
         ensure_line_capacity(idx + 1);
-        free(document_lines[idx]);
-        document_lines[idx] = strdup(line);
+        if (document_lines[idx]) free(document_lines[idx]);
+        document_lines[idx] = strdup(buffer);
+        if (line_metadata) {
+            line_metadata[idx].timestamp = time(NULL);
+            line_metadata[idx].user_id = -1;
+        }
         idx++;
     }
-
-    free(line);
+    line_count = idx;
     fclose(f);
 }

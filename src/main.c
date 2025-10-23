@@ -1,9 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <signal.h>
 #include <string.h>
-#include <sys/stat.h>
+#include <signal.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <errno.h>
 #include "registry.h"
 #include "crdt.h"
 #include "watcher.h"
@@ -26,52 +27,75 @@ static void handle_signal(int sig) {
 static void refresh_peer_list_and_display(int include_self) {
     int active_ids[MAX_USERS];
     char active_queues[MAX_USERS][64];
+    
     int active_count = registry_get_active_users(active_ids, active_queues, MAX_USERS, current_user_id);
-    if (include_self) active_ids[active_count++] = current_user_id; // Include self last
-
-    utils_display_document(local_doc_path, current_user_id, crdt_get_document_lines(), 
-                          crdt_get_line_count(), active_ids, active_count, last_change_msg);
-
-    // Also update broadcaster peers
+    
+    if (include_self) {
+        active_ids[active_count++] = current_user_id;
+    }
+    
+    utils_display_document(local_doc_path, current_user_id, crdt_get_document_lines(),
+                           crdt_get_line_count(), active_ids, active_count, last_change_msg);
+    
+    // Update broadcaster peers
     active_count = registry_get_active_users(active_ids, active_queues, MAX_USERS, current_user_id);
     broadcaster_update_peers(active_ids, active_queues, active_count);
-
-    printf("[DEBUG] Found %d peers:\n", active_count);
-    for (int i = 0; i < active_count; i++) {
-        printf("  - user_%d @ %s\n", active_ids[i], active_queues[i]);
-    }
 }
 
 static void on_local_change(const Operation* op) {
-    snprintf(last_change_msg, sizeof(last_change_msg), 
-             "Change detected: Line %d modified by user_%d", op->line_no, op->user_id);
+    if (!op) return;
+    
+    snprintf(last_change_msg, sizeof(last_change_msg),
+             "Change detected: Line %d modified by user_%d (timestamp: %ld)",
+             op->line_no, op->user_id, op->timestamp);
+    
     broadcaster_add_operation(op);
     crdt_merge_operation(op);
     crdt_save_to_file(local_doc_path);
+    
     refresh_peer_list_and_display(1);
 }
 
 static void on_remote_operation(const Operation* op) {
-    snprintf(last_change_msg, sizeof(last_change_msg), 
-             "Received update from user_%d: Line %d modified", op->user_id, op->line_no);
+    if (!op) return;
+    
+    snprintf(last_change_msg, sizeof(last_change_msg),
+             "Received update from user_%d: Line %d modified (timestamp: %ld)",
+             op->user_id, op->line_no, op->timestamp);
+    
     crdt_merge_operation(op);
     crdt_save_to_file(local_doc_path);
+    
     refresh_peer_list_and_display(1);
 }
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <user_id>\n", argv[0]);
+        fprintf(stderr, "Example: %s 1\n", argv[0]);
         return 1;
     }
-
+    
     current_user_id = atoi(argv[1]);
+    
+    if (current_user_id < 1 || current_user_id > 99) {
+        fprintf(stderr, "Error: user_id must be between 1 and 99\n");
+        return 1;
+    }
+    
     signal(SIGINT, handle_signal);
-
-    mkdir(LOCAL_DOCS_DIR, 0755);
-    snprintf(local_doc_path, sizeof(local_doc_path), "%s/user_%d_doc.txt", LOCAL_DOCS_DIR, current_user_id);
-
-    // Create initial document if not exists
+    signal(SIGTERM, handle_signal);
+    
+    // Create local docs directory
+    if (mkdir(LOCAL_DOCS_DIR, 0755) == -1 && errno != EEXIST) {
+        perror("mkdir");
+        // Continue anyway
+    }
+    
+    snprintf(local_doc_path, sizeof(local_doc_path), "%s/user_%d_doc.txt", 
+             LOCAL_DOCS_DIR, current_user_id);
+    
+    // Create initial document if it doesn't exist
     FILE* f = fopen(local_doc_path, "a+");
     if (f) {
         fseek(f, 0, SEEK_END);
@@ -83,55 +107,88 @@ int main(int argc, char* argv[]) {
         }
         fclose(f);
     }
-
+    
+    // Initialize registry
     if (!registry_init()) {
         fprintf(stderr, "Failed to initialize registry\n");
         return 1;
     }
-
+    
+    // Register this user
     char queue_name[64];
     snprintf(queue_name, sizeof(queue_name), "/queue_user_%d", current_user_id);
-
+    
     if (!registry_register_user(current_user_id, queue_name)) {
         fprintf(stderr, "Failed to register user\n");
         registry_cleanup();
         return 1;
     }
-
+    
+    // Initialize CRDT
     crdt_init();
     crdt_load_from_file(local_doc_path);
-
-    watcher_init(local_doc_path, current_user_id, on_local_change);
-    broadcaster_init();
-    receiver_init(current_user_id, on_remote_operation);
-
-    // Print peer info and update to broadcaster
-    refresh_peer_list_and_display(1);
-
+    
+    // Initialize components
+    if (!watcher_init(local_doc_path, current_user_id, on_local_change)) {
+        fprintf(stderr, "Failed to initialize watcher\n");
+        crdt_destroy();
+        registry_unregister_user(current_user_id);
+        registry_cleanup();
+        return 1;
+    }
+    
+    if (!broadcaster_init()) {
+        fprintf(stderr, "Failed to initialize broadcaster\n");
+        crdt_destroy();
+        registry_unregister_user(current_user_id);
+        registry_cleanup();
+        return 1;
+    }
+    
+    if (!receiver_init(current_user_id, on_remote_operation)) {
+        fprintf(stderr, "Failed to initialize receiver\n");
+        crdt_destroy();
+        registry_unregister_user(current_user_id);
+        registry_cleanup();
+        return 1;
+    }
+    
+    // Start threads
     watcher_start();
     broadcaster_start();
     receiver_start();
-
+    
+    printf("\n");
+    printf("========================================\n");
+    printf("  SyncText Started Successfully!\n");
+    printf("========================================\n");
     printf("Registered as user_%d\n", current_user_id);
     printf("Message queue created: %s\n", queue_name);
-
+    printf("Local document: %s\n", local_doc_path);
+    printf("========================================\n\n");
+    
     // Initial display
     refresh_peer_list_and_display(1);
-
+    
+    // Main loop
     while (running) {
         sleep(2);
-        refresh_peer_list_and_display(1);  // Periodically refresh peer list for new users
+        refresh_peer_list_and_display(1);  // Periodically refresh peer list
     }
-
-    printf("\nShutting down...\n");
-
+    
+    printf("\n\nShutting down gracefully...\n");
+    
+    // Stop threads
     watcher_stop();
     broadcaster_stop();
     receiver_stop();
+    
+    // Cleanup
     crdt_destroy();
     registry_unregister_user(current_user_id);
     registry_cleanup();
-
-    printf("Cleanup complete\n");
+    
+    printf("Cleanup complete. Goodbye!\n");
+    
     return 0;
 }
