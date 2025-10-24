@@ -3,5 +3,6 @@
 #include <stddef.h>
 
 void utils_display_document(const char* doc_name, int user_id, char** lines, size_t line_count,int active_users[], int active_count, const char* last_change);
+void cleanup_local_docs(void);
 
 #endif

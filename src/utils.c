@@ -1,6 +1,42 @@
 #include "utils.h"
 #include <stdio.h>
 #include <time.h>
+#include <dirent.h>
+#include <string.h>
+#include <unistd.h>
+#include <unistd.h>
+#include <errno.h>
+
+void cleanup_local_docs(void) {
+    const char *folder = "local_docs";
+    DIR *d = opendir(folder);
+
+    if (!d) {
+        if (errno == ENOENT) {
+            // Directory does not exist, no files to delete - silently ignore
+            return;
+        } else {
+            perror("cleanup_local_docs: opendir failed");
+            return;
+        }
+    }
+
+    struct dirent *entry;
+    char path[512];
+
+    while ((entry = readdir(d))) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+        snprintf(path, sizeof(path), "%s/%s", folder, entry->d_name);
+        unlink(path);
+    }
+
+    closedir(d);
+
+    if (rmdir(folder) != 0 && errno != ENOENT) {
+        perror("rmdir failed");
+    }
+}
 
 void utils_display_document(const char* doc_name, int user_id, char** lines, size_t line_count,
                              int active_users[], int active_count, const char* last_change) {

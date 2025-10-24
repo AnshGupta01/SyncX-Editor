@@ -22,6 +22,7 @@ static char last_change_msg[512] = "No changes yet";
 static void handle_signal(int sig) {
     (void)sig;
     running = 0;
+    cleanup_local_docs();
 }
 
 static void refresh_peer_list_and_display(int include_self) {
@@ -100,10 +101,20 @@ int main(int argc, char* argv[]) {
     if (f) {
         fseek(f, 0, SEEK_END);
         if (ftell(f) == 0) {
-            fprintf(f, "Line 0: Hello World\n");
-            fprintf(f, "Line 1: This is a collaborative editor\n");
-            fprintf(f, "Line 2: Welcome to SyncText\n");
-            fprintf(f, "Line 3: Edit this document and see real-time updates\n");
+            // Open template file
+            FILE* tf = fopen("template.txt", "r");
+            if (tf) {
+                char buf[4096];
+                while (fgets(buf, sizeof(buf), tf)) {
+                    fputs(buf, f);
+                }
+                fclose(tf);
+            } else {
+                // Fallback: basic default text if template missing
+                fprintf(f, "Welcome to SyncText\n");
+                fprintf(f, "This is the default template text, if not given any template\n");
+                fprintf(f, "Edit this document and see real-time updates\n");
+            }
         }
         fclose(f);
     }
@@ -187,6 +198,7 @@ int main(int argc, char* argv[]) {
     crdt_destroy();
     registry_unregister_user(current_user_id);
     registry_cleanup();
+    cleanup_local_docs();
     
     printf("Cleanup complete. Goodbye!\n");
     
