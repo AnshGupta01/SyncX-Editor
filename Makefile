@@ -67,7 +67,7 @@ debug: $(TARGET)
 test: $(TARGET)
 	@echo "Starting test with 3 users..."
 	@echo "Use Ctrl+C to stop all processes"
-	@./$(TARGET) 1 & ./$(TARGET) 2 & ./$(TARGET) 3 & wait
+	@./$(TARGET) 1 & ./$(TARGET) 2 & ./$(TARGET) 3 & ./$(TARGET) 4 & ./$(TARGET) 5 & wait
 
 # Phony targets
 .PHONY: all clean clean-resources distclean install-deps debug test
