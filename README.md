@@ -101,6 +101,9 @@ make clean
 ./sync 3
 
 # Simply press `CTRL + C` and the process will initiate shutdown and cleanup the files
+
+# Or there is a better way to test directly for 5 Users
+make test
 ```
 
 Each user gets a local document at `local_docs/user_<id>_doc.txt`.

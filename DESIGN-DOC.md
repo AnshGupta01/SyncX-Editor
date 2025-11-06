@@ -8,115 +8,51 @@
 
 ## 1. System Overview
 
-SyncText is a real-time collaborative text editor that allows multiple users (up to 5) to edit a shared document simultaneously using CRDT-based conflict resolution. Each user maintains a local copy of the document that automatically synchronizes with other users through POSIX message queues.
+SyncText is a real-time collaborative text editor that allows multiple users (up to 5) to edit a shared document simultaneously. It uses a Conflict-Free Replicated Data Type (CRDT) approach to ensure eventual consistency without a central server. Each user runs an instance of the editor on the same machine, and changes are propagated via POSIX message queues.
+
+---
+
+## 2. System Architecture
+
+### a) High-level Design Overview
+
+The architecture is decentralized, with each user process running independently. A shared memory segment acts as a registry for user discovery. Each user process has three main threads: one for UI, one for watching file changes, and one for receiving changes from other users. When a local file change is detected, it is converted into an operation and broadcast to all other users' message queues.
 
 **Key Features:**
-- Real-time collaborative editing
-- CRDT Last-Writer-Wins (LWW) merge strategy
-- Automatic change detection via file monitoring
-- POSIX message queue-based communication
-- Shared memory user registry
+- Real-time collaborative editing for up to 5 users on a single machine.
+- CRDT Last-Writer-Wins (LWW) merge strategy for conflict resolution.
+- Automatic change detection via file monitoring (`stat()`).
+- POSIX message queues for inter-process communication.
+- Shared memory for user registry and discovery.
 
----
-
-## 2. Architecture
-
-### 2.1 Component Design
+### b) Major Components and Interaction
 
 The system consists of seven main modules:
+1.  **Registry (`registry.c/h`)**: Manages user discovery via a POSIX shared memory segment. Each user registers their process ID and message queue name.
+2.  **File Watcher (`watcher.c/h`)**: Monitors the local file for changes by polling its modification time.
+3.  **CRDT (`crdt.c/h`)**: Implements the LWW merge logic to apply incoming operations and resolve conflicts.
+4.  **Broadcaster (`broadcaster.c/h`)**: Sends locally generated operations to the message queues of all other active users.
+5.  **Receiver (`receiver.c/h`)**: Listens on the user's own message queue for incoming operations from peers.
+6.  **Operation (`operation.c/h`)**: Defines the structure for operations and handles their serialization/deserialization.
+7.  **Utils (`utils.c/h`)**: Provides utility functions for the terminal UI and display.
 
-1. **Registry** (`registry.c/h`) - Shared memory-based user discovery
-2. **File Watcher** (`watcher.c/h`) - Monitors local file changes using `stat()`
-3. **CRDT** (`crdt.c/h`) - Conflict-free document merging
-4. **Broadcaster** (`broadcaster.c/h`) - Sends operations to peers via message queues
-5. **Receiver** (`receiver.c/h`) - Receives and processes remote operations
-6. **Operation** (`operation.c/h`) - Operation serialization/deserialization
-7. **Utils** (`utils.c/h`) - Terminal UI and display
+**Data Flow:**
+`Local Edit → Watcher Thread → Broadcaster → POSIX MQ → Receiver Thread → CRDT Merge → Display Update`
 
-### 2.2 Data Flow
+### c) Key Data Structures
 
-```
-Local Edit → Watcher Thread → Broadcaster → POSIX MQ → Receiver Thread → CRDT Merge → Display Update
-```
-
-### 2.3 Thread Architecture
-
-Each user instance runs 3 concurrent threads:
-- **Main Thread**: Handles initialization, cleanup, and periodic UI refresh
-- **Watcher Thread**: Monitors local file changes every 500ms using `stat()`
-- **Receiver Thread**: Polls message queue for incoming operations every 10ms
-
----
-
-## 3. Implementation Details
-
-### 3.1 User Registry (Shared Memory)
-
-- Uses POSIX shared memory (`shm_open`) for inter-process communication
-- Each user registers with a unique user_id and message queue name
-- Registry maintains active user list and queue names
-- Path: `/dev/shm/synctext_registry`
-
-### 3.2 Change Detection
-
-The watcher thread:
-1. Polls file modification time using `stat()` every 500ms
-2. Reads file and compares with previous snapshot line-by-line
-3. Generates operations (Insert/Replace/Delete) for changed lines
-4. Passes operations to broadcaster immediately
-
-### 3.3 Message Queue Communication
-
-- Each user has a dedicated POSIX message queue: `/queue_user_<id>`
-- Queue attributes: `mq_maxmsg=10`, `mq_msgsize=sizeof(Operation)`
-- Non-blocking mode with retry logic on queue full (`EAGAIN`)
-- Operations are serialized as fixed-size structs (~4KB)
-
-### 3.4 CRDT Merge Algorithm
-
-**Last-Writer-Wins (LWW) Strategy:**
-- Each operation carries: `timestamp`, `user_id`, `line_no`, `op_type`, `new_text`
-- Conflict resolution: newer timestamp wins; ties broken by lower user_id
-- Document maintains metadata per line: `(timestamp, user_id)`
-
-**Merge Logic:**
-```c
-if (op.timestamp > line.timestamp || 
-    (op.timestamp == line.timestamp && op.user_id < line.user_id)) {
-    apply_operation(op);
-}
-```
-
-**Operation Types:**
-- **Insert (I)**: Add new line
-- **Replace (R)**: Modify existing line
-- **Delete (D)**: Replace line with newline
-
-### 3.5 Lock-Free Programming
-
-- Atomic operations avoided; single-writer-multiple-reader pattern
-- Each thread has dedicated data structures
-- POSIX message queues provide natural synchronization
-- Receiver thread is the sole writer to CRDT document
-
----
-
-## 4. Data Structures
-
-### 4.1 Operation Structure
+**Operation Structure:**
 ```c
 typedef struct {
     int user_id;
-    char op_type;           // 'I', 'R', or 'D'
+    char op_type;           // 'I' (Insert), 'R' (Replace), or 'D' (Delete)
     int line_no;
-    int col_start, col_end;
     time_t timestamp;
-    char old_text[2048];
     char new_text[2048];
 } Operation;
 ```
 
-### 4.2 User Registry Entry
+**User Registry Entry:**
 ```c
 typedef struct {
     int user_id;
@@ -127,70 +63,99 @@ typedef struct {
 
 ---
 
+## 3. Implementation Details
+
+### a) Thread Architecture and Communication
+
+Each user instance runs three concurrent threads:
+-   **Main Thread**: Handles initialization, cleanup, and periodic UI refreshes to display the document.
+-   **Watcher Thread**: Polls the local file's modification time using `stat()` every 500ms. On detecting a change, it computes the difference and generates operations.
+-   **Receiver Thread**: Polls the user’s POSIX message queue for incoming operations every 10ms and passes them to the CRDT module for merging.
+
+Inter-thread communication is minimized; threads pass data through shared data structures designed to prevent race conditions (e.g., a queue for operations).
+
+### b) Change Detection
+
+The file monitoring approach is implemented in the watcher thread:
+1.  It records the file's last modification time.
+2.  Every 500ms, it calls `stat()` on the file path to get the current modification time.
+3.  If the timestamp has changed, it reads the entire file and compares it line-by-line with an in-memory snapshot of the previous version.
+4.  For each changed line, it generates an `Insert`, `Replace`, or `Delete` operation and passes it to the broadcaster.
+
+### c) Message Queues and Shared Memory
+
+-   **Shared Memory**: A single POSIX shared memory segment (`/dev/shm/synctext_registry`) is used for the user registry. This allows processes to discover each other and find the correct message queue names to send operations to.
+-   **Message Queues**: Each user creates a dedicated POSIX message queue named `/queue_user_<id>`. The broadcaster sends operations to these queues, and the receiver reads from its own queue. Queues are configured to be non-blocking with a maximum capacity of 10 messages.
+
+### d) CRDT Merge Algorithm
+
+The implementation uses a **Last-Writer-Wins (LWW)** strategy on a per-line basis.
+-   Each `Operation` is tagged with a `timestamp` and the `user_id`.
+-   The core document data structure maintains a timestamp and user ID for each line.
+-   **Conflict Resolution**: When an operation is received for a line, a conflict may occur if the line was modified locally. The conflict is resolved by comparing timestamps. The operation with the newer timestamp is applied. If timestamps are identical, the operation from the user with the lower `user_id` is chosen as the winner. This ensures all sites converge to the same state.
+
+**Merge Logic:**
+```c
+if (op.timestamp > line.timestamp || 
+    (op.timestamp == line.timestamp && op.user_id < line.user_id)) {
+    apply_operation(op);
+}
+```
+
+---
+
+## 4. Design Decisions
+
+### a) Important Implementation Choices and Rationale
+
+-   **CRDT Choice (Last-Writer-Wins)**: LWW was chosen for its simplicity and low overhead. It does not require complex tombstones or vector clocks, making it easy to implement with simple timestamps. Since the project focuses on line-based edits rather than character-level granularity, the risk of unintentional data loss from concurrent edits on the same line was considered an acceptable trade-off for implementation speed.
+-   **Polling-Based File Watching**: `stat()` polling was used instead of `inotify` for simplicity and portability. While `inotify` is more efficient, it adds complexity in handling different event types. A 500ms polling interval was chosen as a balance between responsiveness and performance overhead.
+-   **Single-Machine IPC**: The decision to use POSIX shared memory and message queues was based on the requirement for a single-machine environment. This avoids the complexity of network programming (sockets, serialization for network transport, etc.).
+
+### b) How You Ensured Lock-Free Operation
+
+The architecture was designed to avoid explicit locks (mutexes, semaphores) by adhering to a single-writer-multiple-reader pattern for critical data.
+-   Each thread has its own dedicated data structures where possible.
+-   The CRDT document state is only ever modified by the **Receiver Thread**. The Watcher and Main threads read from it but never write to it.
+-   POSIX message queues provide natural synchronization for passing operations between processes, serializing access to the shared data.
+
+### c) Trade-offs You Made
+
+1.  **Granularity vs. Simplicity**: The line-based CRDT is much simpler than a character-based one but can be inefficient for small edits and may lead to overwriting valid changes if two users edit the same line concurrently.
+2.  **Performance vs. Reliability**: The message queue size is limited (`mq_maxmsg=10`). During large bulk edits, this can cause the queue to fill, leading to dropped operations. A retry mechanism was added to mitigate this, but it’s a trade-off between memory usage and guaranteed delivery.
+3.  **Portability vs. Features**: The use of POSIX-specific IPC mechanisms limits the application to compliant systems (like Linux) and makes it non-portable to systems like Windows without significant rework.
+
+---
+
 ## 5. Challenges and Solutions
 
-### Challenge 1: Message Queue Overflow
-**Problem:** Large bulk edits (40+ lines) caused some operations to be dropped when queues filled up.
+### a) Major Difficulties Faced
 
-**Solution:** 
-- Implemented retry logic with exponential backoff in broadcaster
-- Retry up to 5 times with 20ms delay
+-   **Message Queue Overflow**: During testing with large copy-paste operations (40+ lines), the broadcaster would generate operations faster than the receiver could process them, causing the message queue to fill up (`EAGAIN` error) and drop subsequent operations.
+-   **Bulk Operation Synchronization**: Rapid, large multi-line changes sometimes resulted in an inconsistent state between users. Because operations were processed individually, a user might see a partially-updated document before all operations for the bulk change had arrived.
+-   **Cross-Platform Compatibility**: Initial attempts to compile on macOS failed because POSIX message queue behavior and limits differ significantly from Linux. The project was then scoped to be Linux-only.
 
-### Challenge 2: Bulk Operation Synchronization
-**Problem:** Rapid multi-line changes sometimes resulted in incomplete synchronization.
+### b) How You Debugged and Resolved Issues
 
-**Solution:**
-- Immediate broadcasting of each operation (no batching)
-- Receiver processes operations immediately on arrival
-- Document shrinking to remove trailing empty lines
-
-### Challenge 3: Cross-Platform Compatibility
-**Problem:** POSIX message queue behavior differs between Linux and macOS.
-
-**Solution:**
-- Would require a lot of changes to conditionally implement POSIX Queues on Linux and IPC on MacOS.
+-   **Logging**: Extensive logging was added to the broadcaster and receiver to trace the flow of operations. Each operation was printed with its timestamp, user ID, and content as it was sent and received. This helped identify when and where operations were being dropped.
+-   **Issue Isolation**: To debug queue overflows, I created a specific test case that involved pasting a 50-line text block. By observing the logs, I confirmed the `EAGAIN` error was the root cause. The solution was to implement a retry loop with an exponential backoff in the broadcaster, giving the receiver time to catch up.
+-   **State Dumps**: A debug function was added to print the entire CRDT document state (including line metadata) for each user. When an inconsistency was found, I could compare the state dumps from different users to pinpoint the exact line and operation that caused the divergence.
 
 ---
 
-## 6. Known Limitations
+## 6. Future Enhancements
 
-1. **Bulk Edit Reliability**: Very large edits (50+ lines) may occasionally miss 1-2 lines due to message queue capacity constraints
-2. **Single Machine**: Currently designed for same-machine operation (shared memory)
-3. **Line-Based Granularity**: Changes tracked per-line, not character-level
-4. **No Persistence**: Document state lost on all users exit
-
----
-
-## 7. Future Enhancements
-
-- Character-level CRDT for finer granularity
-- Network-based communication for distributed deployment
-- Undo/redo support with operation history
+-   Character-level CRDT for finer-grained editing.
+-   Network-based communication (TCP/IP) to support distributed collaboration over the internet.
+-   Undo/redo support by maintaining a history of operations.
 
 ---
 
-## 8. Build and Run
+## 7. References
 
-**Compilation & Cleanup:**
-```bash
-# Clean first then compile
-make clean && make
-
-# Clean overall
-make clean
-```
-
-**Execution:**
-```bash
-./sync 1  # Terminal 1
-./sync 2  # Terminal 2
-./sync 3  # Terminal 3
-```
-
-## 9. References
-1. CRDT: Conflict-Free Replicated Data Types - Marc Shapiro et al.
-2. POSIX Message Queues: `man mq_overview`
-3. POSIX Shared Memory: `man shm_overview`
+1.  CRDT: Conflict-Free Replicated Data Types - Marc Shapiro et al.
+2.  POSIX Message Queues: `man mq_overview`
+3.  POSIX Shared Memory: `man shm_overview`
 
 ---
 
