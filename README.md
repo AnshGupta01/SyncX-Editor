@@ -1,4 +1,4 @@
-# SyncX Collaborative Text Editor
+# SyncX Collab
 
 A CRDT-based real-time collaborative text editor using POSIX message queues. Multiple users can edit a shared document simultaneously with automatic conflict resolution.
 
@@ -18,7 +18,7 @@ A CRDT-based real-time collaborative text editor using POSIX message queues. Mul
 ## Architecture
 
 ```
-SyncText/
+SyncX/
 │
 ├── include/
 │   ├── crdt.h
@@ -72,7 +72,7 @@ SyncText with POSIX Queues consists of the following key components spread acros
 
 ## Requirements
 
-**Platform:** Linux (Ubuntu 20.04+) & macOS (Requires Additional Tweaks)  
+**Platform:** Linux (Ubuntu 20.04+) 
 **Compiler:** GCC 9.4+ with C11 support  
 **Libraries:** pthread, rt (POSIX real-time)
 
@@ -86,10 +86,13 @@ make clean && make
 
 # Clean overall
 make clean
+
+# Fast Testing Method for 5 Users
+make test
 ```
 
 ```bash
-# First start multiple terminals
+# Manual Project Running
 
 # Terminal 1
 ./sync 1
@@ -101,9 +104,6 @@ make clean
 ./sync 3
 
 # Simply press `CTRL + C` and the process will initiate shutdown and cleanup the files
-
-# Or there is a better way to test directly for 5 Users
-make test
 ```
 
 Each user gets a local document at `local_docs/user_<id>_doc.txt`.
