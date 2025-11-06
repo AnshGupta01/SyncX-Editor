@@ -1,4 +1,4 @@
 Welcome to SyncText!
 This is a collaborative text editor.
 Start editing to see changes sync across users.
-You may change the template text by modifying /root/template.txt
+You may change the template text by modifying include/template.txt

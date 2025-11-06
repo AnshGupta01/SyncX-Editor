@@ -102,7 +102,7 @@ int main(int argc, char* argv[]) {
         fseek(f, 0, SEEK_END);
         if (ftell(f) == 0) {
             // Open template file
-            FILE* tf = fopen("template.txt", "r");
+            FILE* tf = fopen("include/template.txt", "r");
             if (tf) {
                 char buf[4096];
                 while (fgets(buf, sizeof(buf), tf)) {

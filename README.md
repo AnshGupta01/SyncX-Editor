@@ -84,9 +84,6 @@ SyncText with POSIX Queues consists of the following key components spread acros
 # Clean first then compile
 make clean && make
 
-# Clean overall
-make clean
-
 # Fast Testing Method for 5 Users
 make test
 ```
