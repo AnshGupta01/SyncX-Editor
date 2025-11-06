@@ -3,7 +3,7 @@
 
 #include <time.h>
 
-#define MAX_TEXT_LEN 2048  // Increased from 1024 for larger changes
+#define MAX_TEXT_LEN 3072  // Increased from 1024 for larger changes
 
 typedef struct {
     int user_id;
