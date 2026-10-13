@@ -35,8 +35,10 @@ static void refresh_peer_list_and_display(int include_self) {
         active_ids[active_count++] = current_user_id;
     }
     
+    crdt_lock();
     utils_display_document(local_doc_path, current_user_id, crdt_get_document_lines(),
                            crdt_get_line_count(), active_ids, active_count, last_change_msg);
+    crdt_unlock();
     
     // Update broadcaster peers
     active_count = registry_get_active_users(active_ids, active_queues, MAX_USERS, current_user_id);
@@ -51,11 +53,10 @@ static void on_local_change(const Operation* op) {
              op->line_no, op->user_id, op->timestamp);
     
     broadcaster_add_operation(op);
-    crdt_merge_operation(op);
     /* Before + after: if the watcher runs mid-save, the trailing note
      * still forces a baseline refresh after the file is complete. */
     watcher_note_self_write();
-    crdt_save_to_file(local_doc_path);
+    crdt_merge_and_save(op, local_doc_path);
     watcher_note_self_write();
     
     refresh_peer_list_and_display(1);
@@ -68,9 +69,8 @@ static void on_remote_operation(const Operation* op) {
              "Received update from user_%d: Line %d modified (timestamp: %ld)",
              op->user_id, op->line_no, op->timestamp);
     
-    crdt_merge_operation(op);
     watcher_note_self_write();
-    crdt_save_to_file(local_doc_path);
+    crdt_merge_and_save(op, local_doc_path);
     watcher_note_self_write();
     
     refresh_peer_list_and_display(1);

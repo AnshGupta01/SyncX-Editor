@@ -26,7 +26,6 @@ SyncX/
 │   ├── broadcaster.h
 │   ├── receiver.h
 │   ├── operation.h
-│   ├── syncQueue.h
 │   ├── registry.h
 │   └── utils.h
 │
@@ -37,7 +36,7 @@ SyncX/
 │   ├── broadcaster.c
 │   ├── receiver.c
 │   ├── registry.c
-│   ├── syncQueue.c
+│   ├── operation.c
 │   └── utils.c
 │
 ├── build/
@@ -57,16 +56,15 @@ SyncText with POSIX Queues consists of the following key components spread acros
 
 1. **User Registry (`registry.[ch]`)** – Shared memory based user discovery  
 2. **File Watcher (`watcher.[ch]`)** – Monitors local document changes  
-3. **CRDT Merge (`crdt.[ch]`)** – Conflict-free document merging  
-4. **Broadcaster (`broadcaster.[ch]`)** – Sends operations to peers via POSIX queues  
+3. **CRDT Merge (`crdt.[ch]`)** – Conflict-free document merging (`crdt_mu` for in-process threads)  
+4. **Broadcaster (`broadcaster.[ch]`)** – Sends operations to peers via POSIX queues (function on watcher stack)  
 5. **Receiver (`receiver.[ch]`)** – Receives and merges operations from message queues  
-6. **Operation Queue (`sync_queue.[ch]`)** – Thread-safe operation passing  
-7. **Terminal UI (`utils.[ch]`)** – Document display and refresh  
+6. **Terminal UI (`utils.[ch]`)** – Document display and refresh  
 
 ---
 
 ### Data Flow
-```Local Edit → Watcher → Queue → Broadcaster → POSIX MQ → Peer Receiver → CRDT Merge → Display```
+```Local Edit → Watcher → Broadcaster → POSIX MQ → Peer Receiver → CRDT Merge → Display```
 
 ---
 

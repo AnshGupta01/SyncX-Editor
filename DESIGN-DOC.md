@@ -72,7 +72,7 @@ Each user instance runs three concurrent threads:
 -   **Watcher Thread**: Polls the local file's modification time using `stat()` every 500ms. On detecting a change, it computes the difference and generates operations.
 -   **Receiver Thread**: Polls the user’s POSIX message queue for incoming operations every 10ms and passes them to the CRDT module for merging.
 
-Inter-thread communication is minimized; threads pass data through shared data structures designed to prevent race conditions (e.g., a queue for operations).
+Inter-thread communication is minimized. The CRDT heap is protected by an in-process `pthread_mutex` (`crdt_merge_and_save`); the broadcaster sends immediately on the watcher stack (no in-process op buffer).
 
 ### b) Change Detection
 

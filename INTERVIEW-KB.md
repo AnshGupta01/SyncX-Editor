@@ -22,7 +22,7 @@ cssclasses:
 > If `DESIGN-DOC.md` disagrees with this file, **trust the code**.
 
 > [!danger] Never say these in an interview
-> lock-free pipeline · exponential backoff · real-time · distributed/decentralized *network* editor · character-level CRDT · sequence CRDT / RGA / Yjs (unless saying you did *not* build them) · guaranteed delivery · inotify · 7 production modules · SyncQueue is used
+> lock-free pipeline · exponential backoff · real-time · distributed/decentralized *network* editor · character-level CRDT · sequence CRDT / RGA / Yjs (unless saying you did *not* build them) · guaranteed delivery · inotify · 7 production modules
 
 **Code names:** repo `SyncX-Editor`, binary `sync`, docs also say SyncText / SyncX Collab.
 
@@ -129,7 +129,7 @@ receiver ── usleep(10000) ── mq_receive ── on_remote_operation()
 
 > [!warning] Design-doc mismatch
 > Docs say a 3-stage watcher–broadcaster–receiver **pipeline** and a lock-free op queue.
-> Code: `broadcaster_start()` logs `"no buffer, immediate send"`. `syncQueue.c` is **never called**.
+> Code: `broadcaster_start()` logs `"no buffer, immediate send"`.
 
 ## Request Lifecycle
 
@@ -190,7 +190,7 @@ Five OS processes share one document. They find each other’s queue names in a 
 - `MAX_USERS = 5`
 - `registry_register_user` scans for `active==0` slot; also deactivates stale same `user_id`
 - Broadcast: `mq_send` of `sizeof(Operation)` bytes to `/queue_user_<id>`
-- C11: `-std=c11` in Makefile (`_Atomic` exists only in unused `syncQueue.c`)
+- C11: `-std=c11` in Makefile
 
 **Gaps (own these):**
 
@@ -342,7 +342,7 @@ You hit a **kernel limit**, measured a failure mode, added backpressure. That is
 
 **Medium:** Why depth 10? Why not blocking send? At-least-once or at-most-once?
 
-**Hard:** Duplicate delivery? Head-of-line blocking? Would a local `SyncQueue` help?
+**Hard:** Duplicate delivery? Head-of-line blocking?
 
 **Brutal:** Prove drop rate improved. (You don’t have numbers — say ESTIMABLE.) Why open/close MQ per op?
 
@@ -352,7 +352,7 @@ You hit a **kernel limit**, measured a failure mode, added backpressure. That is
 
 **Medium:** “Linux default `fs.mqueue.msg_max` is often 10; requesting more makes `mq_open` fail without raising the sysctl. Blocking send could stall the watcher and miss file edits. Semantics: **at-most-once best-effort**. No sequence numbers, no acks, no retry after the 5 attempts, so not at-least-once.”
 
-**Hard:** “No duplicates from my retry loop if `mq_send` succeeded once. A peer crash after dequeue is a drop. `SyncQueue` in-tree is an unused SPSC ring; using it as a watcher→sender buffer would decouple file polling from `mq_send`, but the kernel queue can still fill. True fix: bigger queue, batching, or credit-based flow control.”
+**Hard:** “No duplicates from my retry loop if `mq_send` succeeded once. A peer crash after dequeue is a drop. True fix: bigger queue, batching, or credit-based flow control.”
 
 **Brutal:** “I don’t have a measured X% — I would log failed `mq_send` before/after. Opening the queue per message is lazy and slow; I should cache `mqd_t` per peer.”
 
@@ -579,7 +579,7 @@ Shows you read kernel limits instead of assuming infinite queues. Weak because i
 
 ## C11
 
-**What:** ISO C 2011. Used here mainly as GCC `-std=c11`. Atomics appear only in unused `syncQueue.c`.
+**What:** ISO C 2011. Used here mainly as GCC `-std=c11`. Concurrency on the live path uses `pthread_mutex` (`crdt_mu`).
 
 **Why:** Course + POSIX + pthreads.
 
@@ -910,7 +910,6 @@ This architecture **does not scale by adding users on one box**. MQ and shm are 
 | CRDT | Line LWW, not list CRDT | Time | “LWW-Register per index, not RGA.” | Concurrent inserts |
 | MQ | Depth 10, drops | Kernel default | “I stayed inside msg_max=10 and retried.” | 40–50 line paste |
 | Threads | CRDT race | Incorrect single-writer assumption | “I’d put a mutex around merge+save.” | Dual edit+receive |
-| SyncQueue | Dead code | Abandoned buffer | “I wrote an SPSC ring then inlined send.” | N/A |
 | Files | Non-atomic save; global cleanup | Demo | “rename() + don’t delete peers’ dirs.” | Crash / Ctrl+C |
 | Platform | Linux only | macOS MQ differences | “Scoped to Linux after portability pain.” | macOS build |
 
@@ -944,7 +943,6 @@ This architecture **does not scale by adding users on one box**. MQ and shm are 
 | Area | Current state | Risk | Fix | Priority |
 | --- | --- | --- | --- | --- |
 | CRDT races | Two writers, no lock | High — UB | Mutex | P0 |
-| Dead SyncQueue | Unused atomics queue | Medium — interview trap | Wire it or delete | P0 (honesty) |
 | Design doc lies | Exponential / single-writer / 7 modules | High — trust | Fix doc | P0 |
 | MQ drops | Best-effort | High for correctness | Seqnums + resend / full-state sync | P1 |
 | Index diffs | Insert = N ops | High | LCS or IDs | P1 |
@@ -1043,7 +1041,6 @@ Correctness: races, dropped ops, index identity, echo from saving. Interview int
 1. Walk me through two users inserting at line 0.  
 2. Show me the broadcaster thread. (Trap.)  
 3. Is delivery reliable?  
-4. Why is SyncQueue in the repo?  
 5. How do you know replicas converged?  
 6. What’s `sizeof(Operation)` and why does it matter?  
 7. `volatile` vs atomics vs mutex for `running` and for shm.
@@ -1061,7 +1058,7 @@ Correctness: races, dropped ops, index identity, echo from saving. Interview int
 | Real-time | Latency SLO | 500ms+1s mtime | “Sub-second typical, not RT.” | “Real-time system.” | drop word |
 | Lock-free | Memory orders | Queue unused; CRDT racy | “I wrote an unused SPSC ring.” | “The editor is lock-free.” | delete claim |
 | Exponential backoff | Code | 20ms fixed | “Doc is wrong; constant delay.” | “Exponential.” | fixed 20ms |
-| 7 modules simplify debugging | How? | SyncQueue dead | “I split files; unused queue inflated count.” | “Seven production services.” | drop bullet |
+| 7 modules simplify debugging | How? | Module count | “I split files by concern.” | “Seven production services.” | soften |
 | Off the UI thread | Who prints? | All threads print | “Receive isn’t on main; UI isn’t isolated.” | “Classic UI-thread architecture.” | careful wording |
 | Validated 6KB | Test harness? | sizeof log | “Sized against default 8KB/10.” | “I benchmarked kernel internals.” | sized, not validated-at-scale |
 
@@ -1116,7 +1113,6 @@ Short **ideal answers**. 100 questions.
 35. **Tie-break?** Lower `user_id`.  
 36. **Clock?** `time(NULL)`.  
 37. **Column diff used?** No.  
-38. **SyncQueue used?** No.  
 39. **Serialize used?** No.  
 40. **`volatile running` enough?** Not a full barrier; works in practice on x86, not correct C.  
 41. **Registry lock?** None.  
@@ -1172,7 +1168,6 @@ Short **ideal answers**. 100 questions.
 
 83. **Memory model of shm `volatile int`?** Insufficient; need atomics with seq-cst or mutex.  
 84. **TSAN result?** Would flag CRDT and peer list.  
-85. **ABA on SyncQueue?** SPSC ring with modulo size; unused; classic full/empty one-slot reserve they did (`next_tail==head`).  
 86. **Priority inversion?** Not using RT priorities.  
 87. **`time()` ties under concurrent saves?** Very likely; user_id bias means user 1 always beats user 5 in the same second.  
 88. **Fairness?** LWW+min id is unfair. Hybrid logical clocks still need a tie-break.  
@@ -1185,7 +1180,6 @@ Short **ideal answers**. 100 questions.
 
 93. **Point to the broadcaster pthread.** There isn’t one.  
 94. **Show exponential backoff math.** There isn’t; 20ms constant.  
-95. **Show SyncQueue call sites.** None.  
 96. **Show inotify.** None.  
 97. **Show mutex.** None.  
 98. **Show test asserting convergence.** None.  
@@ -1263,7 +1257,6 @@ Throw away MQ at multi-host; keep “ops + merge”; add IDs, TCP, snapshots.
 15. **5×20ms** — **not** exponential.  
 16. **Still drops** — best-effort.  
 17. **At-most-once.**  
-18. **SyncQueue unused.**  
 19. **Column diff unused.**  
 20. **I and R merge the same.**  
 21. **No mutex on CRDT** — real race.  
@@ -1297,7 +1290,7 @@ Throw away MQ at multi-host; keep “ops + merge”; add IDs, TCP, snapshots.
 4. **Strongest bullet:** #3 overflow / retry.  
 5. **Riskiest bullet:** #2 if you say CRDT loosely; #1 if you say decentralized; #5 if you can’t explain kernel MQ limits.  
 6. **Close before interviews:** CRDT vs OT vs RGA; POSIX MQ sysctls; `volatile` vs mutex; at-most-once; why line index isn’t an identity; TSAN/races; blocking vs non-blocking receive drain math (100 ops/s).  
-7. **I would probe hardest:** “Show me the third thread. Show me exponential backoff. Two users insert at line 0. Does the watcher rebroadcast remote merges? Is SyncQueue used?”
+7. **I would probe hardest:** “Show me the third thread. Show me exponential backoff. Two users insert at line 0. Does the watcher rebroadcast remote merges?”
 
 ---
 
@@ -1312,7 +1305,6 @@ Throw away MQ at multi-host; keep “ops + merge”; add IDs, TCP, snapshots.
 | `src/receiver.c` | mq_receive loop | Yes |
 | `src/crdt.c` | LWW apply | Yes |
 | `src/operation.c` | unused memcpy serdes | No |
-| `src/syncQueue.c` | unused SPSC | Only if asked (dead) |
 | `src/utils.c` | UI + dangerous cleanup | Careful |
 | `Makefile` | `-O2 -std=c11 -lrt` | Passing mention |
 
