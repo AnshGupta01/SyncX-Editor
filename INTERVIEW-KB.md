@@ -262,7 +262,6 @@ else reject;
 - Timestamp = `time(NULL)` → **1 second granularity** → many ties → user_id bias
 - Same machine → clocks agree; this **does not** survive NTP-skew hosts
 - `col_start` / `col_end` / `old_text` are **not used in merge**
-- `crdt_merge_batch` sorts then applies, then shrinks trailing newlines — **never called**
 
 **Not a sequence CRDT:** inserting at line 0 on two replicas does **not** commute. Line numbers shift independently. You can lose a line or mis-align content. Shapiro-style sequence CRDTs use unique IDs (WOOT, RGA, LSEQ, Yjs).
 
@@ -714,7 +713,7 @@ If they ask “what’s your schema?”: draw `Operation`, `UserEntry`, `LineMet
 
 **Performance:** ~6KB × 50 lines × 4 peers ≈ **1.2MB** burst + 200 `mq_open`s.
 
-**Serialization:** `serialize_operation` is `memcpy` — **unused**; send is raw struct.
+**Serialization:** none — send is raw `Operation` struct bytes via `mq_send`.
 
 ### Follow-ups
 
@@ -1121,7 +1120,6 @@ Short **ideal answers**. 100 questions.
 44. **getline?** POSIX, dynamic line buffer in watcher.  
 45. **Why `strdup`?** Own heap copy of line text.  
 46. **`ensure_line_capacity`?** realloc + pad `"\n"`.  
-47. **`shrink_document`?** Only unused batch path.  
 48. **Display ANSI?** `\033[H\033[J`.  
 49. **`MAX_USERS` where?** `registry.h`.  
 50. **Makefile libs?** `-lpthread -lrt`.
@@ -1304,7 +1302,7 @@ Throw away MQ at multi-host; keep “ops + merge”; add IDs, TCP, snapshots.
 | `src/broadcaster.c` | mq_send + retry | Yes |
 | `src/receiver.c` | mq_receive loop | Yes |
 | `src/crdt.c` | LWW apply | Yes |
-| `src/operation.c` | unused memcpy serdes | No |
+| `include/operation.h` | `Operation` wire struct | Yes |
 | `src/utils.c` | UI + dangerous cleanup | Careful |
 | `Makefile` | `-O2 -std=c11 -lrt` | Passing mention |
 

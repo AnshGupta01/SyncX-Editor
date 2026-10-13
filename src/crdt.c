@@ -71,16 +71,6 @@ static void ensure_line_capacity(size_t n) {
     }
 }
 
-static void shrink_document(void) {
-    while(line_count > 0 && document_lines[line_count - 1] && strcmp(document_lines[line_count - 1], "\n") == 0) {
-        free(document_lines[line_count - 1]);
-        document_lines[line_count - 1] = NULL;
-        line_metadata[line_count - 1].timestamp = 0;
-        line_metadata[line_count - 1].user_id = -1;
-        line_count--;
-    }
-}
-
 void crdt_init(void) {
     pthread_mutex_lock(&crdt_mu);
     if (document_lines) {
@@ -218,33 +208,6 @@ bool crdt_merge_and_save(const Operation* op, const char* filepath) {
     save_to_file_unlocked(filepath);
     pthread_mutex_unlock(&crdt_mu);
     return ok;
-}
-
-int crdt_merge_batch(Operation ops[], int count) {
-    if (count <= 0 || !ops) return 0;
-
-    for (int i = 0; i < count - 1; i++) {
-        for (int j = i + 1; j < count; j++) {
-            if (ops[i].timestamp > ops[j].timestamp ||
-                (ops[i].timestamp == ops[j].timestamp && ops[i].user_id > ops[j].user_id)) {
-                Operation temp = ops[i];
-                ops[i] = ops[j];
-                ops[j] = temp;
-            }
-        }
-    }
-
-    pthread_mutex_lock(&crdt_mu);
-    int applied = 0;
-    for (int i = 0; i < count; i++) {
-        if (merge_operation_unlocked(&ops[i])) {
-            applied++;
-        }
-    }
-    shrink_document();
-    pthread_mutex_unlock(&crdt_mu);
-
-    return applied;
 }
 
 char** crdt_get_document_lines(void) {

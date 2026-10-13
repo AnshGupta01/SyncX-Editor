@@ -33,7 +33,7 @@ The system consists of seven main modules:
 3.  **CRDT (`crdt.c/h`)**: Implements the LWW merge logic to apply incoming operations and resolve conflicts.
 4.  **Broadcaster (`broadcaster.c/h`)**: Sends locally generated operations to the message queues of all other active users.
 5.  **Receiver (`receiver.c/h`)**: Listens on the user's own message queue for incoming operations from peers.
-6.  **Operation (`operation.c/h`)**: Defines the structure for operations and handles their serialization/deserialization.
+6.  **Operation (`operation.h`)**: Defines the `Operation` struct shipped as raw bytes on POSIX MQ (no separate serializer).
 7.  **Utils (`utils.c/h`)**: Provides utility functions for the terminal UI and display.
 
 **Data Flow:**

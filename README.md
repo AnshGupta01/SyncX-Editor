@@ -36,7 +36,6 @@ SyncX/
 │   ├── broadcaster.c
 │   ├── receiver.c
 │   ├── registry.c
-│   ├── operation.c
 │   └── utils.c
 │
 ├── build/

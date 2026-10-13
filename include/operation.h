@@ -16,9 +16,4 @@ typedef struct {
     time_t timestamp;
 } Operation;
 
-// Serialization functions
-void serialize_operation(const Operation* op, char* buffer);
-void deserialize_operation(const char* buffer, Operation* op);
-size_t get_serialized_operation_size(void);
-
 #endif
