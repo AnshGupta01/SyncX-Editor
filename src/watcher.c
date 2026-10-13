@@ -12,10 +12,15 @@ static char* filepath = NULL;
 static int user_id_global = 0;
 static pthread_t watcher_thread;
 static volatile bool running = false;
+static volatile bool self_write_pending = false;
 static OperationCallback op_callback = NULL;
 
 static char** old_lines = NULL;
 static size_t old_line_count = 0;
+
+void watcher_note_self_write(void) {
+    self_write_pending = true;
+}
 
 static size_t read_file_lines(const char* path, char*** lines_out) {
     if (!path || !lines_out) {
@@ -154,6 +159,25 @@ static void detect_changes_and_callback(char** old, size_t old_count,
     }
 }
 
+/* Refresh snapshot from disk; update *last_mod_time. No op callbacks. */
+static void refresh_baseline_no_broadcast(time_t* last_mod_time) {
+    if (!filepath || !last_mod_time) return;
+
+    struct stat st;
+    if (stat(filepath, &st) == 0) {
+        *last_mod_time = st.st_mtime;
+    }
+
+    char** new_lines = NULL;
+    size_t new_count = read_file_lines(filepath, &new_lines);
+
+    free_lines(old_lines, old_line_count);
+    old_lines = new_lines;
+    old_line_count = new_count;
+
+    printf("[WATCHER] Self-write — baseline refreshed, no broadcast\n");
+}
+
 static void* watcher_loop(void* arg) {
     (void)arg;
     time_t last_mod_time = 0;
@@ -162,6 +186,14 @@ static void* watcher_loop(void* arg) {
 
     while (running) {
         if (!filepath) {
+            usleep(500000);
+            continue;
+        }
+
+        /* CRDT rewrote the file — adopt new baseline; do not rebroadcast. */
+        if (self_write_pending) {
+            self_write_pending = false;
+            refresh_baseline_no_broadcast(&last_mod_time);
             usleep(500000);
             continue;
         }

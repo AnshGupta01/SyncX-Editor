@@ -52,7 +52,11 @@ static void on_local_change(const Operation* op) {
     
     broadcaster_add_operation(op);
     crdt_merge_operation(op);
+    /* Before + after: if the watcher runs mid-save, the trailing note
+     * still forces a baseline refresh after the file is complete. */
+    watcher_note_self_write();
     crdt_save_to_file(local_doc_path);
+    watcher_note_self_write();
     
     refresh_peer_list_and_display(1);
 }
@@ -65,7 +69,9 @@ static void on_remote_operation(const Operation* op) {
              op->user_id, op->line_no, op->timestamp);
     
     crdt_merge_operation(op);
+    watcher_note_self_write();
     crdt_save_to_file(local_doc_path);
+    watcher_note_self_write();
     
     refresh_peer_list_and_display(1);
 }
